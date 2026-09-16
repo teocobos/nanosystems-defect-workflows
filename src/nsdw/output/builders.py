@@ -4,6 +4,11 @@ from nsdw.config.models import (
     StructureSummary,
     StructureValidationResult,
 )
+from nsdw.structures.symmetry import SymmetryResult
+from nsdw.structures.supercell import (
+    SupercellCandidate,
+    SupercellSearchResult,
+)
 from nsdw.output.models import (
     CheckOutput,
     InequivalentSiteOutput,
@@ -16,8 +21,12 @@ from nsdw.output.models import (
     StructureValidationOutput,
     SymmetryInfoOutput,
     ValidationOutput,
+    SupercellCandidateOutput,
+    SupercellConstraintsOutput,
+    SupercellDiagnosticsOutput,
+    SupercellSearchOutput,
 )
-from nsdw.structures.symmetry import SymmetryResult
+
 
 OUTPUT_PRECISION = 8
 
@@ -225,4 +234,159 @@ def build_structure_symmetry_output(
             ),
             inequivalent_sites=output_sites,
         ),
+    )
+def _build_supercell_candidate_output(
+    candidate: SupercellCandidate | None,
+) -> SupercellCandidateOutput | None:
+    """
+    Convert a scientific supercell candidate into the
+    canonical machine-readable output representation.
+    """
+
+    if candidate is None:
+        return None
+
+    return SupercellCandidateOutput(
+        scaling=list(candidate.scaling),
+        num_atoms=candidate.num_atoms,
+        volume_angstrom3=_round_float(
+            candidate.volume_angstrom3
+        ),
+        a_angstrom=_round_float(
+            candidate.a_angstrom
+        ),
+        b_angstrom=_round_float(
+            candidate.b_angstrom
+        ),
+        c_angstrom=_round_float(
+            candidate.c_angstrom
+        ),
+        minimum_image_distance_angstrom=_round_float(
+            candidate.minimum_image_distance_angstrom
+        ),
+        anisotropy_ratio=_round_float(
+            candidate.anisotropy_ratio
+        ),
+        meets_min_atoms=candidate.meets_min_atoms,
+        meets_max_atoms=candidate.meets_max_atoms,
+        meets_min_image_distance=(
+            candidate.meets_min_image_distance
+        ),
+        acceptable=candidate.acceptable,
+    )
+
+
+def build_supercell_search_output(
+    *,
+    source_path: str | Path,
+    search: SupercellSearchResult,
+    parser_warnings: list[str],
+    nsdw_version: str,
+) -> SupercellSearchOutput:
+    """
+    Build the canonical machine-readable supercell search result.
+    """
+
+    path = Path(
+        source_path
+    ).expanduser().resolve()
+
+    best_within = (
+        search.best_separation_within_atom_limits
+    )
+
+    smallest_meeting = (
+        search.smallest_meeting_image_distance
+    )
+
+    image_shortfall = None
+
+    if (
+        search.selected_candidate is None
+        and best_within is not None
+        and not best_within.meets_min_image_distance
+    ):
+        image_shortfall = max(
+            0.0,
+            search.min_image_distance_angstrom
+            - best_within.minimum_image_distance_angstrom,
+        )
+
+    atom_excess = None
+
+    if (
+        search.selected_candidate is None
+        and smallest_meeting is not None
+        and not smallest_meeting.meets_max_atoms
+    ):
+        atom_excess = max(
+            0,
+            smallest_meeting.num_atoms
+            - search.max_atoms,
+        )
+
+    return SupercellSearchOutput(
+        nsdw_version=nsdw_version,
+        source=SourceInfo(
+            path=str(path),
+            format=path.suffix.lower().lstrip("."),
+        ),
+        parser=ParserOutput(
+            warnings=parser_warnings,
+        ),
+        primitive_num_atoms=(
+            search.primitive_num_atoms
+        ),
+        search_method=search.search_method,
+        ranking_policy=search.ranking_policy,
+        constraints=SupercellConstraintsOutput(
+            min_atoms=search.min_atoms,
+            max_atoms=search.max_atoms,
+            min_image_distance_angstrom=_round_float(
+                search.min_image_distance_angstrom
+            ),
+            max_scale=search.max_scale,
+            image_range=search.image_range,
+        ),
+        num_candidates_evaluated=len(
+            search.candidates
+        ),
+        num_acceptable_candidates=len(
+            search.acceptable_candidates
+        ),
+        selected_candidate=(
+            _build_supercell_candidate_output(
+                search.selected_candidate
+            )
+        ),
+        best_separation_within_atom_limits=(
+            _build_supercell_candidate_output(
+                best_within
+            )
+        ),
+        smallest_meeting_image_distance=(
+            _build_supercell_candidate_output(
+                smallest_meeting
+            )
+        ),
+        diagnostics=SupercellDiagnosticsOutput(
+            image_distance_shortfall_angstrom=(
+                _round_float(image_shortfall)
+            ),
+            atom_excess=atom_excess,
+        ),
+        acceptable_candidates=[
+            _build_supercell_candidate_output(
+                candidate
+            )
+            for candidate
+            in search.acceptable_candidates
+        ],
+        candidates=[
+            _build_supercell_candidate_output(
+                candidate
+            )
+            for candidate
+            in search.candidates
+        ],
     )

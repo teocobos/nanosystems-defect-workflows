@@ -7,10 +7,12 @@ from rich.console import Console
 from nsdw.output.builders import (
     build_structure_symmetry_output,
     build_structure_validation_output,
+    build_supercell_search_output,
 )
 from nsdw.output.renderers import (
     render_structure_symmetry,
     render_structure_validation,
+    render_supercell_search,
 )
 from nsdw.structures.parser import (
     StructureParseError,
@@ -24,6 +26,10 @@ from nsdw.structures.validator import (
     DEFAULT_MIN_DISTANCE,
     summarise_structure,
     validate_structure,
+)
+from nsdw.structures.supercell import (
+    SupercellSearchError,
+    search_supercells,
 )
 
 
@@ -310,7 +316,153 @@ def structure_symmetry(
             result=result,
             console=console,
         )
+@structure_app.command("supercell")
+def structure_supercell(
+    file: Path = typer.Argument(
+        ...,
+        help="Path to a periodic structure file.",
+    ),
+    min_atoms: int = typer.Option(
+        50,
+        "--min-atoms",
+        help="Minimum allowed supercell atom count.",
+        min=1,
+    ),
+    max_atoms: int = typer.Option(
+        250,
+        "--max-atoms",
+        help="Maximum allowed supercell atom count.",
+        min=1,
+    ),
+    min_image_distance: float = typer.Option(
+        10.0,
+        "--min-image-distance",
+        help=(
+            "Minimum periodic image-distance target "
+            "in angstrom."
+        ),
+        min=0.0,
+    ),
+    max_scale: int = typer.Option(
+        4,
+        "--max-scale",
+        help=(
+            "Maximum diagonal scaling factor searched "
+            "in each lattice direction."
+        ),
+        min=1,
+    ),
+    image_range: int = typer.Option(
+        2,
+        "--image-range",
+        help=(
+            "Integer lattice-image range used when "
+            "determining the shortest translation."
+        ),
+        min=1,
+    ),
+    top: int = typer.Option(
+        10,
+        "--top",
+        help=(
+            "Maximum number of acceptable candidates "
+            "shown in text output."
+        ),
+        min=1,
+    ),
+    output_format: Literal["text", "json"] = typer.Option(
+        "text",
+        "--format",
+        "-f",
+        help="Output format: text or json.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the result to a file.",
+    ),
+) -> None:
+    """
+    Search and evaluate candidate diagonal supercells.
+    """
 
+    try:
+        structure, parser_warnings = load_structure(
+            file
+        )
+
+        search = search_supercells(
+            structure,
+            min_atoms=min_atoms,
+            max_atoms=max_atoms,
+            min_image_distance=min_image_distance,
+            max_scale=max_scale,
+            image_range=image_range,
+        )
+
+        result = build_supercell_search_output(
+            source_path=file,
+            search=search,
+            parser_warnings=parser_warnings,
+            nsdw_version=__version__,
+        )
+
+    except (
+        FileNotFoundError,
+        StructureParseError,
+        SupercellSearchError,
+    ) as exc:
+        console.print(
+            f"[bold red]ERROR:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1)
+
+    if output_format == "json":
+        rendered = result.model_dump_json(
+            indent=2
+        )
+
+        if output is None:
+            typer.echo(rendered)
+
+        else:
+            output = (
+                output
+                .expanduser()
+                .resolve()
+            )
+
+            output.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            output.write_text(
+                rendered + "\n",
+                encoding="utf-8",
+            )
+
+            console.print(
+                f"[green]✓[/green] "
+                f"JSON result written to: "
+                f"{output}"
+            )
+
+    else:
+        if output is not None:
+            console.print(
+                "[bold red]ERROR:[/bold red] "
+                "--output currently requires "
+                "--format json."
+            )
+            raise typer.Exit(code=2)
+
+        render_supercell_search(
+            result=result,
+            console=console,
+            top=top,
+        )
 
 if __name__ == "__main__":
     app()

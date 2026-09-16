@@ -4,6 +4,7 @@ from rich.table import Table
 from nsdw.output.models import (
     StructureSymmetryOutput,
     StructureValidationOutput,
+    SupercellSearchOutput,
 )
 
 
@@ -214,3 +215,247 @@ def render_structure_symmetry(
             f" total sites"
             f"[/bold]\n"
         )
+def _format_scaling(
+    scaling: list[int],
+) -> str:
+    return " × ".join(
+        str(value)
+        for value in scaling
+    )
+
+
+def render_supercell_search(
+    result: SupercellSearchOutput,
+    console: Console,
+    top: int = 10,
+) -> None:
+    """
+    Render an NSDW supercell search for terminal use.
+    """
+
+    constraints = result.constraints
+
+    console.print(
+        "\n[bold]NSDW Supercell Search[/bold]\n"
+    )
+
+    console.print(
+        f"Primitive atoms:       "
+        f"{result.primitive_num_atoms}"
+    )
+
+    console.print(
+        f"Search method:         "
+        f"{result.search_method}"
+    )
+
+    console.print(
+        f"Minimum atoms:         "
+        f"{constraints.min_atoms}"
+    )
+
+    console.print(
+        f"Maximum atoms:         "
+        f"{constraints.max_atoms}"
+    )
+
+    console.print(
+        f"Minimum image target:  "
+        f"{constraints.min_image_distance_angstrom:.3f} Å"
+    )
+
+    console.print(
+        f"Maximum scale:         "
+        f"{constraints.max_scale}"
+    )
+
+    console.print(
+        f"Candidates evaluated:  "
+        f"{result.num_candidates_evaluated}"
+    )
+
+    console.print(
+        f"Acceptable candidates: "
+        f"{result.num_acceptable_candidates}"
+    )
+
+    if result.parser.warnings:
+        console.print(
+            "\n[bold yellow]Parser warnings[/bold yellow]"
+        )
+
+        for warning in result.parser.warnings:
+            console.print(
+                f"[yellow]⚠[/yellow] {warning}"
+            )
+
+    if result.selected_candidate is not None:
+        candidate = result.selected_candidate
+
+        console.print(
+            "\n[bold green]"
+            "Candidate selected by ranking policy"
+            "[/bold green]\n"
+        )
+
+        console.print(
+            f"Scaling:               "
+            f"{_format_scaling(candidate.scaling)}"
+        )
+
+        console.print(
+            f"Atoms:                 "
+            f"{candidate.num_atoms}"
+        )
+
+        console.print(
+            f"Minimum image:         "
+            f"{candidate.minimum_image_distance_angstrom:.3f} Å"
+        )
+
+        console.print(
+            f"Anisotropy:            "
+            f"{candidate.anisotropy_ratio:.3f}"
+        )
+
+        console.print(
+            "\n[green]✓[/green] "
+            "All requested hard constraints satisfied."
+        )
+
+    else:
+        console.print(
+            "\n[bold yellow]"
+            "No candidate satisfies all requested constraints."
+            "[/bold yellow]\n"
+        )
+
+        candidate = (
+            result.best_separation_within_atom_limits
+        )
+
+        if candidate is not None:
+            console.print(
+                "[bold]"
+                "Best separation within atom limits"
+                "[/bold]"
+            )
+
+            console.print(
+                f"Scaling:               "
+                f"{_format_scaling(candidate.scaling)}"
+            )
+
+            console.print(
+                f"Atoms:                 "
+                f"{candidate.num_atoms}"
+            )
+
+            console.print(
+                f"Minimum image:         "
+                f"{candidate.minimum_image_distance_angstrom:.3f} Å"
+            )
+
+            shortfall = (
+                result.diagnostics
+                .image_distance_shortfall_angstrom
+            )
+
+            if shortfall is not None:
+                console.print(
+                    f"Distance shortfall:    "
+                    f"{shortfall:.3f} Å"
+                )
+
+        candidate = (
+            result.smallest_meeting_image_distance
+        )
+
+        if candidate is not None:
+            console.print(
+                "\n[bold]"
+                "Smallest cell meeting image-distance target"
+                "[/bold]"
+            )
+
+            console.print(
+                f"Scaling:               "
+                f"{_format_scaling(candidate.scaling)}"
+            )
+
+            console.print(
+                f"Atoms:                 "
+                f"{candidate.num_atoms}"
+            )
+
+            console.print(
+                f"Minimum image:         "
+                f"{candidate.minimum_image_distance_angstrom:.3f} Å"
+            )
+
+            atom_excess = (
+                result.diagnostics.atom_excess
+            )
+
+            if atom_excess is not None:
+                console.print(
+                    f"Atoms above maximum:   "
+                    f"{atom_excess}"
+                )
+
+    if result.acceptable_candidates:
+        table = Table(
+            title=(
+                "Acceptable candidates "
+                f"(top {top})"
+            )
+        )
+
+        table.add_column("Rank", justify="right")
+        table.add_column("Scaling")
+        table.add_column("Atoms", justify="right")
+        table.add_column(
+            "Min image (Å)",
+            justify="right",
+        )
+        table.add_column(
+            "Anisotropy",
+            justify="right",
+        )
+
+        for rank, candidate in enumerate(
+            result.acceptable_candidates[:top],
+            start=1,
+        ):
+            table.add_row(
+                str(rank),
+                _format_scaling(
+                    candidate.scaling
+                ),
+                str(candidate.num_atoms),
+                (
+                    f"{candidate.minimum_image_distance_angstrom:.3f}"
+                ),
+                (
+                    f"{candidate.anisotropy_ratio:.3f}"
+                ),
+            )
+
+        console.print()
+        console.print(table)
+
+    console.print(
+        "\n[dim]"
+        "Selection policy: fewer atoms → lower anisotropy "
+        "→ larger image separation. This is a documented "
+        "computational ranking policy, not a universal "
+        "physical optimum."
+        "[/dim]"
+    )
+
+    console.print(
+        "[dim]"
+        "Current search is restricted to diagonal "
+        "supercell transformations."
+        "[/dim]\n"
+    )

@@ -132,3 +132,81 @@ class StructureSymmetryOutput(BaseModel):
 
     symmetry: SymmetryInfoOutput
     site_analysis: SiteAnalysisOutput
+
+
+# ============================================================================
+# Supercell search output models
+# ============================================================================
+
+
+class SupercellCandidateOutput(BaseModel):
+    scaling: list[int]
+
+    num_atoms: int
+    volume_angstrom3: float
+
+    a_angstrom: float
+    b_angstrom: float
+    c_angstrom: float
+
+    minimum_image_distance_angstrom: float
+    anisotropy_ratio: float
+
+    meets_min_atoms: bool
+    meets_max_atoms: bool
+    meets_min_image_distance: bool
+
+    acceptable: bool
+
+
+class SupercellConstraintsOutput(BaseModel):
+    min_atoms: int
+    max_atoms: int
+    min_image_distance_angstrom: float
+
+    max_scale: int
+    image_range: int
+
+
+class SupercellDiagnosticsOutput(BaseModel):
+    image_distance_shortfall_angstrom: float | None = None
+    atom_excess: int | None = None
+
+
+class SupercellSearchOutput(BaseModel):
+    schema_version: str = "1.0"
+    nsdw_version: str
+    command: str = "structure.supercell"
+
+    source: SourceInfo
+    parser: ParserOutput
+
+    primitive_num_atoms: int
+
+    search_method: str
+    ranking_policy: str
+
+    constraints: SupercellConstraintsOutput
+
+    num_candidates_evaluated: int
+    num_acceptable_candidates: int
+
+    selected_candidate: SupercellCandidateOutput | None = None
+
+    best_separation_within_atom_limits: (
+        SupercellCandidateOutput | None
+    ) = None
+
+    smallest_meeting_image_distance: (
+        SupercellCandidateOutput | None
+    ) = None
+
+    diagnostics: SupercellDiagnosticsOutput
+
+    acceptable_candidates: list[
+        SupercellCandidateOutput
+    ] = Field(default_factory=list)
+
+    candidates: list[
+        SupercellCandidateOutput
+    ] = Field(default_factory=list)
