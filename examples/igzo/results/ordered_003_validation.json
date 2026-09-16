@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "nsdw_version": "0.1.0",
+  "command": "structure.validate",
+  "source": {
+    "path": "/home/teocobos/projects/igzo-defect-modelling/structures/crystalline/ordered_models/igzo_crystal_ordered_003/igzo_crystal_ordered_003.cif",
+    "format": "cif"
+  },
+  "structure": {
+    "formula": "Zn3 In3 Ga3 O12",
+    "reduced_formula": "ZnInGaO4",
+    "num_sites": 21,
+    "density_g_cm3": 6.357335198459853,
+    "lattice": {
+      "a_angstrom": 3.299,
+      "b_angstrom": 3.299,
+      "c_angstrom": 26.101,
+      "alpha_deg": 90.0,
+      "beta_deg": 90.0,
+      "gamma_deg": 119.99999999999999,
+      "volume_angstrom3": 246.00980086119998
+    }
+  },
+  "parser": {
+    "warnings": [
+      "Issues encountered while parsing CIF: 30 fractional coordinates rounded to ideal values to avoid issues with finite precision."
+    ]
+  },
+  "validation": {
+    "valid": true,
+    "ordered": true,
+    "minimum_distance_angstrom": 1.930118578941562,
+    "checks": [
+      {
+        "name": "Valid lattice",
+        "passed": true,
+        "value": "246.009801 Å³",
+        "message": null
+      },
+      {
+        "name": "Finite coordinates",
+        "passed": true,
+        "value": null,
+        "message": null
+      },
+      {
+        "name": "Valid composition",
+        "passed": true,
+        "value": "Zn3 In3 Ga3 O12",
+        "message": null
+      },
+      {
+        "name": "Fully ordered sites",
+        "passed": true,
+        "value": "ordered",
+        "message": null
+      },
+      {
+        "name": "Minimum interatomic distance",
+        "passed": true,
+        "value": "1.930119 Å",
+        "message": "Threshold: 0.500 Å"
+      }
+    ],
+    "warnings": [],
+    "errors": []
+  }
+}
