@@ -27,3 +27,4 @@ Thumbs.db
 
 # Generated NSDW results
 examples/*/results/workspace/
+workspace/
