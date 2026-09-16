@@ -1,0 +1,2 @@
+[console_scripts]
+nsdw = nsdw.cli:app

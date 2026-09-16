@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nsdw"
+version = "0.1.0"
+description = "Nanosystems Defect Workflows: automated semiconductor structure, convergence, and defect modelling workflows."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+
+authors = [
+    {name = "Teofilo Cobos Freire"}
+]
+
+dependencies = [
+    "ase>=3.23",
+    "pymatgen>=2024.1",
+    "spglib>=2.3",
+    "pydantic>=2.0",
+    "PyYAML>=6.0",
+    "typer>=0.12",
+    "rich>=13.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0"
+]
+
+[project.scripts]
+nsdw = "nsdw.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
