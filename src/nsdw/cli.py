@@ -1,11 +1,17 @@
 from pathlib import Path
+from typing import Literal
 
 import typer
 from rich.console import Console
-from rich.table import Table
 
+from nsdw.output.builders import build_structure_validation_output
+from nsdw.output.renderers import render_structure_validation
 from nsdw.structures.parser import StructureParseError, load_structure
-from nsdw.structures.validator import summarise_structure, validate_structure
+from nsdw.structures.validator import (
+    DEFAULT_MIN_DISTANCE,
+    summarise_structure,
+    validate_structure,
+)
 
 
 app = typer.Typer(
@@ -58,114 +64,108 @@ def structure_validate(
     file: Path = typer.Argument(
         ...,
         help="Path to a CIF or XYZ structure file.",
-    )
+    ),
+    output_format: Literal["text", "json"] = typer.Option(
+        "text",
+        "--format",
+        "-f",
+        help="Output format: text or json.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the result to a file.",
+    ),
+    min_distance: float = typer.Option(
+        DEFAULT_MIN_DISTANCE,
+        "--min-distance",
+        help=(
+            "Minimum allowed periodic interatomic distance "
+            "in angstrom."
+        ),
+        min=0.0,
+    ),
 ) -> None:
     """
     Parse and validate a periodic atomic structure.
     """
 
-    # ------------------------------------------------------------------
-    # Parse structure
-    # ------------------------------------------------------------------
-
     try:
-        structure = load_structure(file)
+        structure, parser_warnings = load_structure(file)
+
         summary = summarise_structure(structure)
-        validation = validate_structure(structure)
+
+        validation = validate_structure(
+            structure,
+            min_distance=min_distance,
+        )
+
+        result = build_structure_validation_output(
+            source_path=file,
+            summary=summary,
+            validation=validation,
+            parser_warnings=parser_warnings,
+            nsdw_version=__version__,
+            minimum_distance_threshold=min_distance,
+        )
 
     except (FileNotFoundError, StructureParseError) as exc:
-        console.print(f"[bold red]ERROR:[/bold red] {exc}")
+        console.print(
+            f"[bold red]ERROR:[/bold red] {exc}"
+        )
         raise typer.Exit(code=1)
 
-    # ------------------------------------------------------------------
-    # Structure summary
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
+    # Machine-readable JSON
+    # --------------------------------------------------------------
 
-    table = Table(title="NSDW Structure Validation")
+    if output_format == "json":
+        rendered = result.model_dump_json(indent=2)
 
-    table.add_column("Property")
-    table.add_column("Value")
+        if output is None:
+            typer.echo(rendered)
 
-    table.add_row("Formula", summary.formula)
-    table.add_row("Reduced formula", summary.reduced_formula)
-    table.add_row("Atoms", str(summary.num_sites))
-    table.add_row("Density", f"{summary.density:.4f} g/cm³")
-
-    table.add_section()
-
-    table.add_row("a", f"{summary.lattice.a:.6f} Å")
-    table.add_row("b", f"{summary.lattice.b:.6f} Å")
-    table.add_row("c", f"{summary.lattice.c:.6f} Å")
-
-    table.add_row("alpha", f"{summary.lattice.alpha:.4f}°")
-    table.add_row("beta", f"{summary.lattice.beta:.4f}°")
-    table.add_row("gamma", f"{summary.lattice.gamma:.4f}°")
-
-    table.add_row("Volume", f"{summary.lattice.volume:.4f} Å³")
-
-    console.print(table)
-
-    # ------------------------------------------------------------------
-    # Validation checks
-    # ------------------------------------------------------------------
-
-    console.print("\n[bold]Validation checks[/bold]")
-
-    for check in validation.checks:
-        if check.passed:
-            symbol = "[green]✓[/green]"
         else:
-            symbol = "[red]✗[/red]"
+            output = output.expanduser().resolve()
 
-        details = ""
-
-        if check.value:
-            details += f" — {check.value}"
-
-        if check.message:
-            details += f" ({check.message})"
-
-        console.print(
-            f"{symbol} {check.name}{details}"
-        )
-
-    # ------------------------------------------------------------------
-    # Warnings
-    # ------------------------------------------------------------------
-
-    if validation.warnings:
-        console.print("\n[bold yellow]Warnings[/bold yellow]")
-
-        for warning in validation.warnings:
-            console.print(
-                f"[yellow]⚠[/yellow] {warning}"
+            output.parent.mkdir(
+                parents=True,
+                exist_ok=True,
             )
 
-    # ------------------------------------------------------------------
-    # Errors
-    # ------------------------------------------------------------------
-
-    if validation.errors:
-        console.print("\n[bold red]Errors[/bold red]")
-
-        for error in validation.errors:
-            console.print(
-                f"[red]✗[/red] {error}"
+            output.write_text(
+                rendered + "\n",
+                encoding="utf-8",
             )
 
-    # ------------------------------------------------------------------
-    # Final result
-    # ------------------------------------------------------------------
+            console.print(
+                f"[green]✓[/green] "
+                f"JSON result written to: {output}"
+            )
 
-    if validation.valid:
-        console.print(
-            "\n[bold green]RESULT: STRUCTURE VALID[/bold green]"
-        )
+    # --------------------------------------------------------------
+    # Human-readable terminal output
+    # --------------------------------------------------------------
 
     else:
-        console.print(
-            "\n[bold red]RESULT: STRUCTURE INVALID[/bold red]"
+        if output is not None:
+            console.print(
+                "[bold red]ERROR:[/bold red] "
+                "--output currently requires --format json."
+            )
+            raise typer.Exit(code=2)
+
+        render_structure_validation(
+            result=result,
+            console=console,
         )
+
+    # --------------------------------------------------------------
+    # Exit status
+    # --------------------------------------------------------------
+
+    if not result.validation.valid:
         raise typer.Exit(code=1)
 
 

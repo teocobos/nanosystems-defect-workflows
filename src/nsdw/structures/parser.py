@@ -1,4 +1,5 @@
 from pathlib import Path
+import warnings
 
 from pymatgen.core import Structure
 
@@ -10,35 +11,34 @@ class StructureParseError(Exception):
 SUPPORTED_FORMATS = {".cif", ".xyz"}
 
 
-def load_structure(path: str | Path) -> Structure:
+def load_structure(
+    path: str | Path,
+) -> tuple[Structure, list[str]]:
     """
     Load a periodic structure from a supported structure file.
 
-    Parameters
-    ----------
-    path
-        Path to the structure file.
-
     Returns
     -------
-    pymatgen.core.Structure
-        Parsed periodic structure.
+    structure
+        Parsed pymatgen Structure.
 
-    Raises
-    ------
-    FileNotFoundError
-        If the requested file does not exist.
-    StructureParseError
-        If the format is unsupported or the structure cannot be parsed.
+    parser_warnings
+        Warnings emitted by the underlying parser. These are captured
+        rather than printed directly so NSDW can report them in a
+        controlled and reproducible way.
     """
 
     path = Path(path).expanduser().resolve()
 
     if not path.exists():
-        raise FileNotFoundError(f"Structure file not found: {path}")
+        raise FileNotFoundError(
+            f"Structure file not found: {path}"
+        )
 
     if not path.is_file():
-        raise StructureParseError(f"Path is not a file: {path}")
+        raise StructureParseError(
+            f"Path is not a file: {path}"
+        )
 
     suffix = path.suffix.lower()
 
@@ -48,20 +48,36 @@ def load_structure(path: str | Path) -> Structure:
             f"Supported formats: {', '.join(sorted(SUPPORTED_FORMATS))}"
         )
 
+    # Standard XYZ does not contain a periodic lattice.
+    # NSDW must never invent one silently.
     if suffix == ".xyz":
         raise StructureParseError(
             "XYZ support requires lattice metadata and will be "
-            "implemented in the next Phase 1A step."
+            "implemented in a later Phase 1A step."
         )
 
     try:
-        structure = Structure.from_file(path)
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+
+            structure = Structure.from_file(path)
+
     except Exception as exc:
         raise StructureParseError(
             f"Failed to parse structure file '{path}': {exc}"
         ) from exc
 
     if len(structure) == 0:
-        raise StructureParseError("Parsed structure contains no atomic sites.")
+        raise StructureParseError(
+            "Parsed structure contains no atomic sites."
+        )
 
-    return structure
+    parser_warnings = []
+
+    for warning in caught_warnings:
+        message = str(warning.message).strip()
+
+        if message and message not in parser_warnings:
+            parser_warnings.append(message)
+
+    return structure, parser_warnings
