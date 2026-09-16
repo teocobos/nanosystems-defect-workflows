@@ -11,7 +11,7 @@ from nsdw.models.electronic import ElectronicResult
 from nsdw.models.quantity import Quantity
 from nsdw.models.structure import StructureResult
 from nsdw.models.defect import DefectResult
-
+from nsdw.models.provenance import ProvenanceResult
 
 class EnergyResult(BaseModel):
     """Energy quantities associated with a calculation."""
@@ -34,3 +34,4 @@ class NSDWResult(BaseModel):
     energy: EnergyResult | None = None
     electronic: ElectronicResult | None = None
     defect: DefectResult | None = None
+    provenance: ProvenanceResult | None = None

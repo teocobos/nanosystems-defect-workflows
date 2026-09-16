@@ -22,6 +22,15 @@ from nsdw.models.defect import (
     DefectType,
     FormationEnergyResult,
 )
+from nsdw.models.provenance import (
+    CP2KSettings,
+    ExecutionPlatform,
+    ExecutionProvenance,
+    FileReference,
+    ProvenanceResult,
+    SchedulerType,
+    SoftwareProvenance,
+)
 from nsdw.models.quantity import Quantity
 from nsdw.models.result import EnergyResult, NSDWResult
 from nsdw.models.structure import SpaceGroup, StructureResult
@@ -48,4 +57,11 @@ __all__ = [
     "DefectResult",
     "DefectType",
     "FormationEnergyResult",
+    "CP2KSettings",
+    "ExecutionPlatform",
+    "ExecutionProvenance",
+    "FileReference",
+    "ProvenanceResult",
+    "SchedulerType",
+    "SoftwareProvenance",
 ]
