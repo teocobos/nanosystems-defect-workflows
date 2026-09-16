@@ -210,3 +210,96 @@ class SupercellSearchOutput(BaseModel):
     candidates: list[
         SupercellCandidateOutput
     ] = Field(default_factory=list)
+
+
+# ============================================================================
+# Defect generation output models
+# ============================================================================
+
+
+class DefectSymmetryOutput(BaseModel):
+    site_id: str
+
+    primitive_site_index: int
+    primitive_atom_number: int
+    multiplicity: int
+
+    primitive_fractional_coordinates: list[float]
+
+
+class DefectSupercellOutput(BaseModel):
+    scaling: list[int]
+
+    pristine_num_atoms: int
+    defect_num_atoms: int
+
+
+class RemovedSiteOutput(BaseModel):
+    supercell_site_index: int
+    supercell_atom_number: int
+
+    fractional_coordinates: list[float]
+
+
+class DefectProvenanceOutput(BaseModel):
+    parent_structure: str
+    parent_structure_path: str
+    parent_structure_sha256: str
+
+
+class VacancyMetadataOutput(BaseModel):
+    schema_version: str = "1.0"
+    nsdw_version: str
+
+    defect_id: str
+    defect_type: str
+
+    species: str
+    charge_state: int
+
+    symmetry: DefectSymmetryOutput
+    supercell: DefectSupercellOutput
+    removed_site: RemovedSiteOutput
+    provenance: DefectProvenanceOutput
+
+    structure_file: str
+
+
+class DefectManifestEntryOutput(BaseModel):
+    defect_id: str
+    species: str
+    charge_state: int
+
+    symmetry_site_id: str
+    multiplicity: int
+
+    structure_file: str
+    metadata_file: str
+
+
+class DefectManifestOutput(BaseModel):
+    schema_version: str = "1.0"
+    nsdw_version: str
+    command: str = "defects.generate-vacancies"
+
+    source: SourceInfo
+    parser: ParserOutput
+
+    parent_structure_sha256: str
+
+    species: str
+    charge_state: int
+
+    primitive_num_atoms: int
+
+    supercell_scaling: list[int]
+    pristine_supercell_num_atoms: int
+
+    num_inequivalent_sites: int
+    num_defects_generated: int
+
+    pristine_structure_file: str
+
+    defects: list[
+        DefectManifestEntryOutput
+    ] = Field(default_factory=list)

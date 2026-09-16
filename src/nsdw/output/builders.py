@@ -9,6 +9,9 @@ from nsdw.structures.supercell import (
     SupercellCandidate,
     SupercellSearchResult,
 )
+from nsdw.structures.defects import (
+    VacancyStructure,
+)
 from nsdw.output.models import (
     CheckOutput,
     InequivalentSiteOutput,
@@ -25,7 +28,15 @@ from nsdw.output.models import (
     SupercellConstraintsOutput,
     SupercellDiagnosticsOutput,
     SupercellSearchOutput,
+    DefectManifestEntryOutput,
+    DefectManifestOutput,
+    DefectProvenanceOutput,
+    DefectSupercellOutput,
+    DefectSymmetryOutput,
+    RemovedSiteOutput,
+    VacancyMetadataOutput,
 )
+
 
 
 OUTPUT_PRECISION = 8
@@ -389,4 +400,144 @@ def build_supercell_search_output(
             for candidate
             in search.candidates
         ],
+    )
+def build_vacancy_metadata_output(
+    *,
+    vacancy: VacancyStructure,
+    source_path: str | Path,
+    parent_structure_sha256: str,
+    structure_file: str,
+    nsdw_version: str,
+) -> VacancyMetadataOutput:
+    """
+    Build metadata for one generated vacancy structure.
+    """
+
+    path = Path(
+        source_path
+    ).expanduser().resolve()
+
+    return VacancyMetadataOutput(
+        nsdw_version=nsdw_version,
+        defect_id=vacancy.defect_id,
+        defect_type=vacancy.defect_type,
+        species=vacancy.species,
+        charge_state=vacancy.charge_state,
+        symmetry=DefectSymmetryOutput(
+            site_id=vacancy.symmetry_site_id,
+            primitive_site_index=(
+                vacancy.primitive_site_index
+            ),
+            primitive_atom_number=(
+                vacancy.primitive_atom_number
+            ),
+            multiplicity=(
+                vacancy.primitive_multiplicity
+            ),
+            primitive_fractional_coordinates=[
+                _round_float(value)
+                for value
+                in vacancy.primitive_fractional_coordinates
+            ],
+        ),
+        supercell=DefectSupercellOutput(
+            scaling=list(
+                vacancy.supercell_scaling
+            ),
+            pristine_num_atoms=(
+                vacancy.pristine_supercell_num_atoms
+            ),
+            defect_num_atoms=(
+                vacancy.defect_structure_num_atoms
+            ),
+        ),
+        removed_site=RemovedSiteOutput(
+            supercell_site_index=(
+                vacancy.removed_supercell_site_index
+            ),
+            supercell_atom_number=(
+                vacancy.removed_supercell_atom_number
+            ),
+            fractional_coordinates=[
+                _round_float(value)
+                for value
+                in (
+                    vacancy
+                    .removed_supercell_fractional_coordinates
+                )
+            ],
+        ),
+        provenance=DefectProvenanceOutput(
+            parent_structure=path.name,
+            parent_structure_path=str(path),
+            parent_structure_sha256=(
+                parent_structure_sha256
+            ),
+        ),
+        structure_file=structure_file,
+    )
+
+
+def build_defect_manifest_output(
+    *,
+    source_path: str | Path,
+    parser_warnings: list[str],
+    parent_structure_sha256: str,
+    species: str,
+    charge_state: int,
+    primitive_num_atoms: int,
+    supercell_scaling: tuple[int, int, int],
+    pristine_supercell_num_atoms: int,
+    num_inequivalent_sites: int,
+    pristine_structure_file: str,
+    defect_entries: list[
+        DefectManifestEntryOutput
+    ],
+    nsdw_version: str,
+) -> DefectManifestOutput:
+    """
+    Build the top-level vacancy-generation manifest.
+    """
+
+    path = Path(
+        source_path
+    ).expanduser().resolve()
+
+    return DefectManifestOutput(
+        nsdw_version=nsdw_version,
+        source=SourceInfo(
+            path=str(path),
+            format=(
+                path.suffix
+                .lower()
+                .lstrip(".")
+            ),
+        ),
+        parser=ParserOutput(
+            warnings=parser_warnings,
+        ),
+        parent_structure_sha256=(
+            parent_structure_sha256
+        ),
+        species=species,
+        charge_state=charge_state,
+        primitive_num_atoms=(
+            primitive_num_atoms
+        ),
+        supercell_scaling=list(
+            supercell_scaling
+        ),
+        pristine_supercell_num_atoms=(
+            pristine_supercell_num_atoms
+        ),
+        num_inequivalent_sites=(
+            num_inequivalent_sites
+        ),
+        num_defects_generated=len(
+            defect_entries
+        ),
+        pristine_structure_file=(
+            pristine_structure_file
+        ),
+        defects=defect_entries,
     )

@@ -26,4 +26,4 @@ dist/
 Thumbs.db
 
 # Generated NSDW results
-examples/*/results/
+examples/*/results/workspace/
