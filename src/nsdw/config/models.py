@@ -20,3 +20,19 @@ class StructureSummary(BaseModel):
     density: float = Field(gt=0)
 
     lattice: LatticeSummary
+
+
+class ValidationCheck(BaseModel):
+    name: str
+    passed: bool
+    value: str | None = None
+    message: str | None = None
+
+
+class StructureValidationResult(BaseModel):
+    valid: bool
+    minimum_distance: float | None = None
+    ordered: bool
+    checks: list[ValidationCheck]
+    warnings: list[str] = []
+    errors: list[str] = []
