@@ -6,14 +6,18 @@ from nsdw.config.models import (
 )
 from nsdw.output.models import (
     CheckOutput,
+    InequivalentSiteOutput,
     LatticeOutput,
     ParserOutput,
+    SiteAnalysisOutput,
     SourceInfo,
     StructureOutput,
+    StructureSymmetryOutput,
     StructureValidationOutput,
+    SymmetryInfoOutput,
     ValidationOutput,
 )
-
+from nsdw.structures.symmetry import SymmetryResult
 
 OUTPUT_PRECISION = 8
 
@@ -96,5 +100,129 @@ def build_structure_validation_output(
             ],
             warnings=validation.warnings,
             errors=validation.errors,
+        ),
+    )
+def build_structure_symmetry_output(
+    *,
+    source_path: str | Path,
+    symmetry: SymmetryResult,
+    parser_warnings: list[str],
+    nsdw_version: str,
+    selected_element: str | None = None,
+) -> StructureSymmetryOutput:
+    """
+    Build the canonical machine-readable symmetry result.
+
+    Site IDs are assigned deterministically within each element,
+    ordered by representative zero-based structure index.
+    """
+
+    path = Path(source_path).expanduser().resolve()
+
+    if selected_element is not None:
+        selected_element = selected_element.strip()
+
+        matching_sites = [
+            site
+            for site in symmetry.inequivalent_sites
+            if site.element.lower()
+            == selected_element.lower()
+        ]
+
+    else:
+        matching_sites = list(
+            symmetry.inequivalent_sites
+        )
+
+    # Count all physical sites represented by the selected
+    # inequivalent classes.
+    total_selected_sites = sum(
+        site.multiplicity
+        for site in matching_sites
+    )
+
+    # Site IDs are numbered independently for each element.
+    element_counters: dict[str, int] = {}
+
+    output_sites = []
+
+    for site in matching_sites:
+        element_counters.setdefault(
+            site.element,
+            0,
+        )
+
+        element_counters[site.element] += 1
+
+        site_id = (
+            f"{site.element}"
+            f"{element_counters[site.element]:03d}"
+        )
+
+        output_sites.append(
+            InequivalentSiteOutput(
+                site_id=site_id,
+                element=site.element,
+                representative_index=(
+                    site.representative_index
+                ),
+                representative_atom_number=(
+                    site.representative_index + 1
+                ),
+                multiplicity=site.multiplicity,
+                equivalent_indices=(
+                    site.equivalent_indices
+                ),
+                equivalent_atom_numbers=[
+                    index + 1
+                    for index
+                    in site.equivalent_indices
+                ],
+                fractional_coordinates=[
+                    _round_float(value)
+                    for value
+                    in site.fractional_coordinates
+                ],
+            )
+        )
+
+    return StructureSymmetryOutput(
+        nsdw_version=nsdw_version,
+        source=SourceInfo(
+            path=str(path),
+            format=path.suffix.lower().lstrip("."),
+        ),
+        parser=ParserOutput(
+            warnings=parser_warnings,
+        ),
+        symmetry=SymmetryInfoOutput(
+            space_group_symbol=(
+                symmetry.space_group_symbol
+            ),
+            space_group_number=(
+                symmetry.space_group_number
+            ),
+            hall_symbol=symmetry.hall_symbol,
+            point_group=symmetry.point_group,
+            crystal_system=symmetry.crystal_system,
+            symprec_angstrom=_round_float(
+                symmetry.symprec_angstrom
+            ),
+            angle_tolerance_deg=_round_float(
+                symmetry.angle_tolerance_deg
+            ),
+            num_symmetry_operations=(
+                symmetry.num_symmetry_operations
+            ),
+        ),
+        site_analysis=SiteAnalysisOutput(
+            selected_element=selected_element,
+            total_selected_sites=(
+                total_selected_sites
+            ),
+            num_inequivalent_sites=len(
+                output_sites
+            ),
+            inequivalent_sites=output_sites,
         ),
     )
