@@ -24,6 +24,10 @@ from nsdw.calculators.cp2k.input_parser import (
     parse_cp2k_input,
     parse_cp2k_input_text,
 )
+from nsdw.calculators.cp2k.execution import (
+    CP2KExecutionError,
+    build_cp2k_execution_request,
+)
 
 __all__ = [
     "CP2KRunType",
@@ -42,4 +46,6 @@ __all__ = [
     "ParsedCP2KKind",
     "parse_cp2k_input",
     "parse_cp2k_input_text",
+    "CP2KExecutionError",
+    "build_cp2k_execution_request",
 ]

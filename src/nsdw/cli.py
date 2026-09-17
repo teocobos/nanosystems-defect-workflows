@@ -39,7 +39,10 @@ from nsdw.structures.validator import (
     summarise_structure,
     validate_structure,
 )
-
+from nsdw.workflows import (
+    SinglePointWorkflowError,
+    run_cp2k_single_point,
+)
 
 app = typer.Typer(
     name="nsdw",
@@ -57,6 +60,11 @@ defects_app = typer.Typer(
     no_args_is_help=True,
 )
 
+workflow_app = typer.Typer(
+    help="Run semiconductor modelling workflows.",
+    no_args_is_help=True,
+)
+
 app.add_typer(
     structure_app,
     name="structure",
@@ -65,6 +73,11 @@ app.add_typer(
 app.add_typer(
     defects_app,
     name="defects",
+)
+
+app.add_typer(
+    workflow_app,
+    name="workflow",
 )
 
 console = Console()
@@ -676,6 +689,129 @@ def generate_vacancies_command(
             f"{vacancy.primitive_multiplicity})"
         )
 
+# ============================================================================
+# Single-point workflow
+# ============================================================================
+
+
+@workflow_app.command("single-point")
+def workflow_single_point(
+    calculator: Literal["cp2k"] = typer.Option(
+        "cp2k",
+        "--calculator",
+        "-c",
+        help="Calculator backend.",
+    ),
+    workdir: Path = typer.Option(
+        Path("."),
+        "--workdir",
+        "-w",
+        help="Calculation working directory.",
+    ),
+    input_file: Path = typer.Option(
+        ...,
+        "--input",
+        "-i",
+        help="Calculator input file.",
+    ),
+    output_file: Path = typer.Option(
+        Path("calculation.out"),
+        "--output",
+        "-o",
+        help="Calculator output file.",
+    ),
+    result_file: Path = typer.Option(
+        Path("result.json"),
+        "--result",
+        "-r",
+        help="NSDW result JSON file.",
+    ),
+    calculation_id: str | None = typer.Option(
+        None,
+        "--id",
+        help="Calculation identifier.",
+    ),
+    executable: str = typer.Option(
+        "cp2k.psmp",
+        "--executable",
+        help="CP2K executable.",
+    ),
+) -> None:
+    """
+    Run a local single-point calculation and build an NSDW result.
+    """
+
+    workdir = (
+        workdir
+        .expanduser()
+        .resolve()
+    )
+
+    if calculation_id is None:
+        calculation_id = input_file.stem
+
+    try:
+        if calculator == "cp2k":
+            result = run_cp2k_single_point(
+                calculation_id=calculation_id,
+                working_directory=workdir,
+                input_file=input_file,
+                output_file=output_file,
+                executable=executable,
+                result_file=result_file,
+            )
+
+    except (
+        FileNotFoundError,
+        SinglePointWorkflowError,
+        RuntimeError,
+    ) as exc:
+        console.print(
+            f"[bold red]ERROR:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1)
+
+    console.print(
+        "\n[bold green]"
+        "Single-point workflow completed"
+        "[/bold green]\n"
+    )
+
+    console.print(
+        f"Calculation ID:  "
+        f"{result.calculation.id}"
+    )
+
+    console.print(
+        f"Calculator:      "
+        f"{result.calculation.backend.value}"
+    )
+
+    console.print(
+        f"Status:          "
+        f"{result.calculation.status.value}"
+    )
+
+    if (
+        result.energy is not None
+        and result.energy.total is not None
+    ):
+        console.print(
+            f"Total energy:    "
+            f"{result.energy.total.value:.8f} "
+            f"{result.energy.total.unit}"
+        )
+
+    destination = (
+        result_file
+        if result_file.is_absolute()
+        else workdir / result_file
+    )
+
+    console.print(
+        f"Result:          "
+        f"{destination.resolve()}"
+    )
 
 if __name__ == "__main__":
     app()

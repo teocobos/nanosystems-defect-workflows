@@ -332,3 +332,60 @@ def test_multiplicity_mismatch_rejected():
             parsed,
             input_settings=input_settings,
         )
+def test_adapter_records_input_output_files(
+    tmp_path,
+):
+    parsed = _completed_energy_result()
+
+    input_path = tmp_path / "test.inp"
+    output_path = tmp_path / "test.out"
+
+    input_path.write_text(
+        "&GLOBAL\n&END GLOBAL\n"
+    )
+    output_path.write_text(
+        "CP2K test output\n"
+    )
+
+    result = adapt_cp2k_result(
+        parsed,
+        input_path=input_path,
+        output_path=output_path,
+    )
+
+    assert result.provenance is not None
+
+    assert len(
+        result.provenance.input_files
+    ) == 1
+
+    assert len(
+        result.provenance.output_files
+    ) == 1
+
+    input_ref = (
+        result.provenance.input_files[0]
+    )
+    output_ref = (
+        result.provenance.output_files[0]
+    )
+
+    assert input_ref.format == "cp2k-input"
+    assert output_ref.format == "cp2k-output"
+
+    assert input_ref.path == str(
+        input_path.resolve()
+    )
+    assert output_ref.path == str(
+        output_path.resolve()
+    )
+
+    assert len(input_ref.sha256) == 64
+    assert len(output_ref.sha256) == 64
+
+    assert input_ref.size_bytes == (
+        input_path.stat().st_size
+    )
+    assert output_ref.size_bytes == (
+        output_path.stat().st_size
+    )

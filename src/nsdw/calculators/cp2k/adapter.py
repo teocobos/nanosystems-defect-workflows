@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nsdw.calculators.cp2k.models import (
     CP2KRunType,
     CP2KSCFStatus,
@@ -29,6 +31,9 @@ from nsdw.models.result import (
     NSDWResult,
 )
 
+from nsdw.provenance.files import (
+    build_file_reference,
+)
 
 HARTREE_TO_EV = 27.211386245988
 
@@ -105,6 +110,8 @@ def adapt_cp2k_result(
     parsed: ParsedCP2KResult,
     *,
     input_settings: ParsedCP2KInput | None = None,
+    input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
     calculation_id: str | None = None,
     nsdw_version: str = "0.1.0",
     platform: ExecutionPlatform = ExecutionPlatform.LOCAL,
@@ -139,6 +146,28 @@ def adapt_cp2k_result(
             "CP2K version is required for provenance"
         )
 
+    input_files = (
+        (
+            build_file_reference(
+                input_path,
+                format="cp2k-input",
+            ),
+        )
+        if input_path is not None
+        else ()
+    )
+
+    output_files = (
+        (
+            build_file_reference(
+                output_path,
+                format="cp2k-output",
+            ),
+        )
+        if output_path is not None
+        else ()
+    )
+
     return NSDWResult(
         calculation=CalculationMetadata(
             id=result_id,
@@ -159,6 +188,8 @@ def adapt_cp2k_result(
                 platform=platform,
                 scheduler=scheduler,
             ),
+            input_files=input_files,
+            output_files=output_files,
             cp2k=_build_cp2k_settings(
                 parsed,
                 input_settings,
