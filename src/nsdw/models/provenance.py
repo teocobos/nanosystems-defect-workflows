@@ -57,24 +57,47 @@ class SoftwareProvenance(BaseModel):
     nsdw_version: str
     git_commit: str | None = None
 
+class CP2KKindSettings(BaseModel):
+    """Species-specific basis and potential assignment."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
+
+    kind: str
+    element: str | None = None
+    basis_set: str | None = None
+    potential: str | None = None
 
 class CP2KSettings(BaseModel):
     """Scientifically relevant CP2K settings."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
 
-    xc_functional: str
+    xc_functional: str | None = None
 
-    basis_sets: tuple[str, ...] = ()
-    potentials: tuple[str, ...] = ()
+    kinds: tuple[CP2KKindSettings, ...] = ()
+
+    basis_set_file: str | None = None
+    potential_file: str | None = None
 
     cutoff: Quantity | None = None
     relative_cutoff: Quantity | None = None
 
     charge: int = 0
-    multiplicity: int = Field(default=1, gt=0)
+    multiplicity: int = Field(
+        default=1,
+        gt=0,
+    )
 
-    eps_scf: float | None = Field(default=None, gt=0)
+    eps_scf: float | None = Field(
+        default=None,
+        gt=0,
+    )
 
     k_points: tuple[int, int, int] | None = None
 

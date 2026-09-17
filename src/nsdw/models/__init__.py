@@ -30,6 +30,7 @@ from nsdw.models.provenance import (
     ProvenanceResult,
     SchedulerType,
     SoftwareProvenance,
+    CP2KKindSettings,
 )
 from nsdw.models.quantity import Quantity
 from nsdw.models.result import EnergyResult, NSDWResult
@@ -58,6 +59,7 @@ __all__ = [
     "DefectType",
     "FormationEnergyResult",
     "CP2KSettings",
+    "CP2KKindSettings",
     "ExecutionPlatform",
     "ExecutionProvenance",
     "FileReference",

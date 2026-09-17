@@ -6,11 +6,23 @@ from nsdw.calculators.cp2k.models import (
     ParsedCP2KEnergy,
     ParsedCP2KResult,
     ParsedCP2KSCF,
+    ParsedCP2KInput,
+    ParsedCP2KKind,
 )
 from nsdw.calculators.cp2k.parser import (
     CP2KParseError,
     parse_cp2k_output,
     parse_cp2k_text,
+)
+from nsdw.calculators.cp2k.adapter import (
+    CP2KAdapterError,
+    HARTREE_TO_EV,
+    adapt_cp2k_result,
+)
+from nsdw.calculators.cp2k.input_parser import (
+    CP2KInputParseError,
+    parse_cp2k_input,
+    parse_cp2k_input_text,
 )
 
 __all__ = [
@@ -22,4 +34,12 @@ __all__ = [
     "CP2KParseError",
     "parse_cp2k_output",
     "parse_cp2k_text",
+    "CP2KAdapterError",
+    "HARTREE_TO_EV",
+    "adapt_cp2k_result",
+    "CP2KInputParseError",
+    "ParsedCP2KInput",
+    "ParsedCP2KKind",
+    "parse_cp2k_input",
+    "parse_cp2k_input_text",
 ]

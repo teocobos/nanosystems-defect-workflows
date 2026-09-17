@@ -12,6 +12,7 @@ from nsdw.models import (
     Quantity,
     SchedulerType,
     SoftwareProvenance,
+    CP2KKindSettings,
 )
 
 
@@ -38,14 +39,22 @@ def test_file_reference_rejects_empty_hash():
 def test_cp2k_settings():
     settings = CP2KSettings(
         xc_functional="PBE0-TC-LRC",
-        basis_sets=(
-            "TZV2P-MOLOPT-PBE-GTH-q13",
-            "TZV2P-MOLOPT-PBE-GTH-q6",
+        kinds=(
+            CP2KKindSettings(
+                kind="In",
+                element="In",
+                basis_set="TZV2P-MOLOPT-PBE-GTH-q13",
+                potential="GTH-PBE-q13",
+            ),
+            CP2KKindSettings(
+                kind="O",
+                element="O",
+                basis_set="TZV2P-MOLOPT-PBE-GTH-q6",
+                potential="GTH-PBE-q6",
+            ),
         ),
-        potentials=(
-            "GTH-PBE-q13",
-            "GTH-PBE-q6",
-        ),
+        basis_set_file="BASIS_MOLOPT_UZH",
+        potential_file="POTENTIAL_UZH",
         cutoff=Quantity(
             value=600.0,
             unit="Ry",
@@ -62,9 +71,45 @@ def test_cp2k_settings():
     )
 
     assert settings.xc_functional == "PBE0-TC-LRC"
-    assert settings.admm is True
-    assert settings.k_points == (2, 2, 1)
 
+    assert len(settings.kinds) == 2
+
+    assert settings.kinds[0].kind == "In"
+    assert settings.kinds[0].element == "In"
+    assert (
+        settings.kinds[0].basis_set
+        == "TZV2P-MOLOPT-PBE-GTH-q13"
+    )
+    assert (
+        settings.kinds[0].potential
+        == "GTH-PBE-q13"
+    )
+
+    assert settings.kinds[1].kind == "O"
+    assert settings.kinds[1].element == "O"
+
+    assert (
+        settings.basis_set_file
+        == "BASIS_MOLOPT_UZH"
+    )
+    assert (
+        settings.potential_file
+        == "POTENTIAL_UZH"
+    )
+
+    assert settings.cutoff is not None
+    assert settings.cutoff.value == 600.0
+    assert settings.cutoff.unit == "Ry"
+
+    assert settings.relative_cutoff is not None
+    assert settings.relative_cutoff.value == 60.0
+    assert settings.relative_cutoff.unit == "Ry"
+
+    assert settings.charge == 0
+    assert settings.multiplicity == 1
+    assert settings.eps_scf == 1e-6
+    assert settings.k_points == (2, 2, 1)
+    assert settings.admm is True
 
 def test_execution_on_archer2():
     execution = ExecutionProvenance(
