@@ -262,6 +262,7 @@ class SlurmStatusResult(BaseModel):
     job_id: str
     state: SlurmJobState
     raw_state: str
+    exit_code: str | None = None
 
 def parse_slurm_state(
     raw_state: str,
@@ -334,6 +335,7 @@ class SlurmExecutor:
         *,
         sbatch_executable: str = "sbatch",
         squeue_executable: str = "squeue",
+        sacct_executable: str = "sacct",
     ) -> None:
         if not sbatch_executable.strip():
             raise ValueError(
@@ -345,8 +347,14 @@ class SlurmExecutor:
                 "squeue executable cannot be empty"
             )
 
+        if not sacct_executable.strip():
+            raise ValueError(
+                "sacct executable cannot be empty"
+            )
+
         self.sbatch_executable = sbatch_executable
         self.squeue_executable = squeue_executable
+        self.sacct_executable = sacct_executable
 
     def submit(
         self,
@@ -487,3 +495,90 @@ class SlurmExecutor:
             state=parse_slurm_state(raw_state),
             raw_state=raw_state,
         )
+
+    def query_accounting(
+        self,
+        job_id: str,
+    ) -> SlurmStatusResult | None:
+        """Query SLURM accounting information using sacct."""
+
+        if not job_id.strip():
+            raise ValueError(
+                "SLURM job ID cannot be empty"
+            )
+
+        try:
+            process = subprocess.run(
+                [
+                    self.sacct_executable,
+                    "--noheader",
+                    "--parsable2",
+                    "--jobs",
+                    job_id,
+                    "--format=JobIDRaw,State,ExitCode",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise SlurmExecutionError(
+                "SLURM sacct executable was not found: "
+                f"{self.sacct_executable}"
+            ) from exc
+
+        if process.returncode != 0:
+            message = (
+                process.stderr.strip()
+                or process.stdout.strip()
+                or "unknown sacct error"
+            )
+
+            raise SlurmExecutionError(
+                f"SLURM accounting query failed: {message}"
+            )
+
+        lines = [
+            line.strip()
+            for line in process.stdout.splitlines()
+            if line.strip()
+        ]
+
+        if not lines:
+            return None
+
+        for line in lines:
+            fields = line.split("|")
+
+            if len(fields) < 3:
+                continue
+
+            accounting_job_id = fields[0].strip()
+
+            if accounting_job_id != job_id:
+                continue
+
+            raw_state = fields[1].strip()
+            exit_code = fields[2].strip() or None
+
+            return SlurmStatusResult(
+                job_id=job_id,
+                state=parse_slurm_state(raw_state),
+                raw_state=raw_state,
+                exit_code=exit_code,
+            )
+
+        return None
+
+    def query_status(
+        self,
+        job_id: str,
+    ) -> SlurmStatusResult | None:
+        """Query the current or final status of a SLURM job."""
+
+        active_status = self.query_active(job_id)
+
+        if active_status is not None:
+            return active_status
+
+        return self.query_accounting(job_id)
