@@ -1,12 +1,16 @@
 """Tests for CP2K execution-request construction."""
 
+from pathlib import Path
 import pytest
-
 from nsdw.calculators.cp2k.execution import (
     CP2KExecutionError,
     build_cp2k_execution_request,
 )
-
+from nsdw.calculators.cp2k import (
+    build_archer2_cp2k_job,
+    build_cp2k_execution_request,
+)
+from nsdw.execution import render_slurm_script
 
 def test_build_cp2k_execution_request(
     tmp_path,
@@ -140,3 +144,70 @@ def test_empty_cp2k_executable_rejected(
             output_file="test.out",
             executable="   ",
         )
+def test_build_archer2_cp2k_job(tmp_path):
+    job = build_archer2_cp2k_job(
+        calculation_id="igzo_sp_001",
+        working_directory=tmp_path,
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        nodes=2,
+        tasks_per_node=128,
+        walltime="02:00:00",
+    )
+
+    assert job.name == "igzo_sp_001"
+    assert job.calculation_id == "igzo_sp_001"
+
+    assert job.resources.nodes == 2
+    assert job.resources.tasks_per_node == 128
+    assert job.resources.account == "e05"
+    assert job.resources.partition == "standard"
+    assert job.resources.qos == "standard"
+
+    assert job.modules == ("load cp2k",)
+
+    assert job.command == (
+        "srun",
+        "--hint=nomultithread",
+        "--distribution=block:block",
+        "cp2k.psmp",
+        "-i",
+        "igzo.inp",
+        "-o",
+        "igzo.out",
+    )
+
+
+def test_render_archer2_cp2k_script(tmp_path):
+    job = build_archer2_cp2k_job(
+        calculation_id="igzo_sp_001",
+        working_directory=tmp_path,
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        nodes=1,
+        tasks_per_node=128,
+        walltime="01:00:00",
+    )
+
+    script = render_slurm_script(job)
+
+    assert "#SBATCH --job-name=igzo_sp_001" in script
+    assert "#SBATCH --nodes=1" in script
+    assert "#SBATCH --ntasks-per-node=128" in script
+    assert "#SBATCH --cpus-per-task=1" in script
+    assert "#SBATCH --time=01:00:00" in script
+    assert "#SBATCH --account=e05" in script
+    assert "#SBATCH --partition=standard" in script
+    assert "#SBATCH --qos=standard" in script
+
+    assert "module load cp2k" in script
+    assert "export OMP_NUM_THREADS=1" in script
+
+    assert (
+        "srun --hint=nomultithread "
+        "--distribution=block:block "
+        "cp2k.psmp -i igzo.inp -o igzo.out"
+        in script
+    )

@@ -26,6 +26,7 @@ from nsdw.calculators.cp2k.input_parser import (
 )
 from nsdw.calculators.cp2k.execution import (
     CP2KExecutionError,
+    build_archer2_cp2k_job,
     build_cp2k_execution_request,
 )
 
@@ -48,4 +49,5 @@ __all__ = [
     "parse_cp2k_input_text",
     "CP2KExecutionError",
     "build_cp2k_execution_request",
+    "build_archer2_cp2k_job",
 ]

@@ -1,11 +1,12 @@
 """CP2K execution-request construction for NSDW."""
 
 from __future__ import annotations
-
 from pathlib import Path
-
 from nsdw.execution import ExecutionRequest
-
+from nsdw.execution.profiles.archer2 import (
+    build_archer2_job,
+)
+from nsdw.execution.slurm import SlurmJob
 
 class CP2KExecutionError(RuntimeError):
     """Raised when a CP2K execution request cannot be built."""
@@ -63,4 +64,36 @@ def build_cp2k_execution_request(
         ),
         working_directory=working_directory,
         environment=environment or {},
+    )
+def build_archer2_cp2k_job(
+    *,
+    calculation_id: str,
+    working_directory: Path,
+    input_file: Path,
+    output_file: Path,
+    account: str,
+    nodes: int = 1,
+    tasks_per_node: int = 128,
+    cpus_per_task: int = 1,
+    walltime: str = "01:00:00",
+) -> SlurmJob:
+    """Build an ARCHER2 CP2K job."""
+
+    return build_archer2_job(
+        name=calculation_id,
+        calculation_id=calculation_id,
+        working_directory=working_directory,
+        command=(
+            "cp2k.psmp",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_file),
+        ),
+        account=account,
+        nodes=nodes,
+        tasks_per_node=tasks_per_node,
+        cpus_per_task=cpus_per_task,
+        walltime=walltime,
+        modules=("load cp2k",),
     )
