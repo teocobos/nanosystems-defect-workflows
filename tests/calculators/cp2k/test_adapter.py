@@ -25,6 +25,11 @@ from nsdw.models.calculation import (
 from nsdw.calculators.cp2k.input_parser import (
     parse_cp2k_input,
 )
+from nsdw.execution import (
+    ExecutionBackend,
+    ExecutionResult,
+    ExecutionState,
+)
 
 FIXTURES = (
     Path(__file__).parent
@@ -388,4 +393,44 @@ def test_adapter_records_input_output_files(
     )
     assert output_ref.size_bytes == (
         output_path.stat().st_size
+    )
+
+def test_adapter_records_execution_provenance():
+    parsed = _completed_energy_result()
+
+    execution = ExecutionResult(
+        calculation_id="test",
+        backend=ExecutionBackend.LOCAL,
+        state=ExecutionState.COMPLETED,
+        return_code=0,
+        host="test-host",
+        command=(
+            "cp2k.psmp",
+            "-i",
+            "test.inp",
+            "-o",
+            "test.out",
+        ),
+        started_at="2026-09-17T13:00:00+01:00",
+        completed_at="2026-09-17T13:01:00+01:00",
+    )
+
+    result = adapt_cp2k_result(
+        parsed,
+        execution_result=execution,
+    )
+
+    assert result.provenance is not None
+
+    provenance = result.provenance.execution
+
+    assert provenance.host == "test-host"
+    assert provenance.command == (
+        "cp2k.psmp -i test.inp -o test.out"
+    )
+    assert provenance.started_at == (
+        "2026-09-17T13:00:00+01:00"
+    )
+    assert provenance.completed_at == (
+        "2026-09-17T13:01:00+01:00"
     )

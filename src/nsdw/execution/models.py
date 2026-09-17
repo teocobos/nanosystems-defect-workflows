@@ -104,6 +104,9 @@ class ExecutionResult(BaseModel):
     return_code: int | None = None
     job_id: str | None = None
 
+    host: str | None = None
+    command: tuple[str, ...] = ()
+
     started_at: str | None = None
     completed_at: str | None = None
 

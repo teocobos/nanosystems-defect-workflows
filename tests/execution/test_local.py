@@ -41,6 +41,8 @@ def test_local_executor_runs_command(
         == ExecutionState.COMPLETED
     )
     assert result.return_code == 0
+    assert result.host is not None
+    assert result.command == request.command
 
     assert (
         tmp_path / "stdout.txt"

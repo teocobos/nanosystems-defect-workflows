@@ -91,6 +91,7 @@ def run_cp2k_single_point(
         input_settings=parsed_input,
         input_path=input_path,
         output_path=output_path,
+        execution_result=execution,
         calculation_id=calculation_id,
         platform=ExecutionPlatform.LOCAL,
         scheduler=SchedulerType.LOCAL,

@@ -6,6 +6,7 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
+import socket
 
 from nsdw.execution.models import (
     ExecutionBackend,
@@ -141,6 +142,8 @@ class LocalExecutor:
             backend=ExecutionBackend.LOCAL,
             state=state,
             return_code=completed.returncode,
+            host=socket.gethostname(),
+            command=request.command,
             started_at=started_at,
             completed_at=completed_at,
             stdout_file=(

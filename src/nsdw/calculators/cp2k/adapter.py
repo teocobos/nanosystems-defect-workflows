@@ -35,6 +35,8 @@ from nsdw.provenance.files import (
     build_file_reference,
 )
 
+from nsdw.execution.models import ExecutionResult
+
 HARTREE_TO_EV = 27.211386245988
 
 
@@ -112,6 +114,7 @@ def adapt_cp2k_result(
     input_settings: ParsedCP2KInput | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
+    execution_result: ExecutionResult | None = None,
     calculation_id: str | None = None,
     nsdw_version: str = "0.1.0",
     platform: ExecutionPlatform = ExecutionPlatform.LOCAL,
@@ -168,6 +171,39 @@ def adapt_cp2k_result(
         else ()
     )
 
+    execution_provenance = ExecutionProvenance(
+        platform=platform,
+        scheduler=scheduler,
+        host=(
+            execution_result.host
+            if execution_result is not None
+            else None
+        ),
+        job_id=(
+            execution_result.job_id
+            if execution_result is not None
+            else None
+        ),
+        command=(
+            " ".join(execution_result.command)
+            if (
+                execution_result is not None
+                and execution_result.command
+            )
+            else None
+        ),
+        started_at=(
+            execution_result.started_at
+            if execution_result is not None
+            else None
+        ),
+        completed_at=(
+            execution_result.completed_at
+            if execution_result is not None
+            else None
+        ),
+    )
+
     return NSDWResult(
         calculation=CalculationMetadata(
             id=result_id,
@@ -184,10 +220,7 @@ def adapt_cp2k_result(
                 ),
                 nsdw_version=nsdw_version,
             ),
-            execution=ExecutionProvenance(
-                platform=platform,
-                scheduler=scheduler,
-            ),
+            execution=execution_provenance,
             input_files=input_files,
             output_files=output_files,
             cp2k=_build_cp2k_settings(
