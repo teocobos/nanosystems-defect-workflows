@@ -93,10 +93,72 @@ def test_submit_cp2k_single_point_archer2(
         tasks_per_node=128,
         cpus_per_task=1,
         walltime="01:00:00",
+        module="cp2k",
+        executable="cp2k.psmp",
     )
 
     executor.submit.assert_called_once_with(job)
 
+@patch(
+    "nsdw.workflows.hpc_single_point."
+    "build_archer2_cp2k_job"
+)
+def test_submit_cp2k_single_point_archer2_custom_module(
+    mock_build_job,
+):
+    executor = Mock()
+
+    job = SlurmJob(
+        name="igzo_sp",
+        calculation_id="igzo_sp",
+        working_directory=Path("/work/test"),
+        command=(
+            "srun",
+            "--hint=nomultithread",
+            "--distribution=block:block",
+            "cp2k.psmp",
+            "-i",
+            "igzo.inp",
+            "-o",
+            "igzo.out",
+        ),
+        resources=SlurmResources(
+            nodes=1,
+            tasks_per_node=128,
+            cpus_per_task=1,
+            account="e05",
+            partition="standard",
+            qos="standard",
+        ),
+    )
+
+    mock_build_job.return_value = job
+    executor.submit.return_value = _submission()
+
+    submit_cp2k_single_point_archer2(
+        calculation_id="igzo_sp",
+        working_directory=Path("/work/test"),
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        module="cp2k/cp2k-2025.2",
+        executable="cp2k.psmp",
+        executor=executor,
+    )
+
+    mock_build_job.assert_called_once_with(
+        calculation_id="igzo_sp",
+        working_directory=Path("/work/test"),
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        nodes=1,
+        tasks_per_node=128,
+        cpus_per_task=1,
+        walltime="01:00:00",
+        module="cp2k/cp2k-2025.2",
+        executable="cp2k.psmp",
+    )
 
 @patch(
     "nsdw.workflows.hpc_single_point."
@@ -349,6 +411,8 @@ def test_run_cp2k_single_point_archer2(
         tasks_per_node=128,
         cpus_per_task=1,
         walltime="01:00:00",
+        module="cp2k",
+        executable="cp2k.psmp",
         executor=executor,
     )
 
@@ -364,4 +428,98 @@ def test_run_cp2k_single_point_archer2(
         input_file=Path("igzo.inp"),
         output_file=Path("igzo.out"),
         result_file="result.json",
+    )
+
+@patch(
+    "nsdw.workflows.hpc_single_point."
+    "collect_cp2k_single_point_archer2"
+)
+@patch(
+    "nsdw.workflows.hpc_single_point."
+    "wait_for_cp2k_single_point"
+)
+@patch(
+    "nsdw.workflows.hpc_single_point."
+    "submit_cp2k_single_point_archer2"
+)
+def test_run_cp2k_single_point_archer2_custom_module(
+    mock_submit,
+    mock_wait,
+    mock_collect,
+    tmp_path,
+):
+    executor = Mock()
+
+    job = SlurmJob(
+        name="igzo_sp",
+        calculation_id="igzo_sp",
+        working_directory=tmp_path,
+        command=(
+            "srun",
+            "--hint=nomultithread",
+            "--distribution=block:block",
+            "cp2k.psmp",
+            "-i",
+            "igzo.inp",
+            "-o",
+            "igzo.out",
+        ),
+        resources=SlurmResources(
+            nodes=1,
+            tasks_per_node=128,
+            cpus_per_task=1,
+            account="e05",
+            partition="standard",
+            qos="standard",
+        ),
+    )
+
+    submission = SlurmSubmissionResult(
+        calculation_id="igzo_sp",
+        job_id="123456",
+        host="login01",
+        submitted_at="2026-09-17T15:00:00+01:00",
+        script_path=tmp_path / "job.sh",
+    )
+
+    hpc_submission = HPCSinglePointSubmission(
+        job=job,
+        submission=submission,
+    )
+
+    status = SlurmStatusResult(
+        job_id="123456",
+        state=SlurmJobState.COMPLETED,
+        raw_state="COMPLETED",
+        exit_code="0:0",
+    )
+
+    mock_submit.return_value = hpc_submission
+    mock_wait.return_value = status
+    mock_collect.return_value = Mock()
+
+    run_cp2k_single_point_archer2(
+        calculation_id="igzo_sp",
+        working_directory=tmp_path,
+        input_file="igzo.inp",
+        output_file="igzo.out",
+        account="e05",
+        module="cp2k/cp2k-2025.2",
+        executable="cp2k.psmp",
+        executor=executor,
+    )
+
+    mock_submit.assert_called_once_with(
+        calculation_id="igzo_sp",
+        working_directory=tmp_path.resolve(),
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        nodes=1,
+        tasks_per_node=128,
+        cpus_per_task=1,
+        walltime="01:00:00",
+        module="cp2k/cp2k-2025.2",
+        executable="cp2k.psmp",
+        executor=executor,
     )

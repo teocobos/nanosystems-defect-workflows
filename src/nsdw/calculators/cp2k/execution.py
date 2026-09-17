@@ -76,15 +76,27 @@ def build_archer2_cp2k_job(
     tasks_per_node: int = 128,
     cpus_per_task: int = 1,
     walltime: str = "01:00:00",
+    module: str = "cp2k",
+    executable: str = "cp2k.psmp",
 ) -> SlurmJob:
     """Build an ARCHER2 CP2K job."""
+
+    if not module.strip():
+        raise CP2KExecutionError(
+            "CP2K module cannot be empty"
+        )
+
+    if not executable.strip():
+        raise CP2KExecutionError(
+            "CP2K executable cannot be empty"
+        )
 
     return build_archer2_job(
         name=calculation_id,
         calculation_id=calculation_id,
         working_directory=working_directory,
         command=(
-            "cp2k.psmp",
+            executable,
             "-i",
             str(input_file),
             "-o",
@@ -95,5 +107,5 @@ def build_archer2_cp2k_job(
         tasks_per_node=tasks_per_node,
         cpus_per_task=cpus_per_task,
         walltime=walltime,
-        modules=("load cp2k",),
+        modules=(f"load {module}",),
     )

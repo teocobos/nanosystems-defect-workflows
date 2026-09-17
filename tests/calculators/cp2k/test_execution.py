@@ -211,3 +211,67 @@ def test_render_archer2_cp2k_script(tmp_path):
         "cp2k.psmp -i igzo.inp -o igzo.out"
         in script
     )
+
+def test_build_archer2_cp2k_job_versioned_module(
+    tmp_path,
+):
+    job = build_archer2_cp2k_job(
+        calculation_id="igzo_sp_001",
+        working_directory=tmp_path,
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        module="cp2k/cp2k-2025.2",
+        executable="cp2k.psmp",
+    )
+
+    assert job.modules == (
+        "load cp2k/cp2k-2025.2",
+    )
+
+    assert job.command == (
+        "srun",
+        "--hint=nomultithread",
+        "--distribution=block:block",
+        "cp2k.psmp",
+        "-i",
+        "igzo.inp",
+        "-o",
+        "igzo.out",
+    )
+
+    script = render_slurm_script(job)
+
+    assert (
+        "module load cp2k/cp2k-2025.2"
+        in script
+    )
+
+def test_archer2_cp2k_empty_module_rejected(tmp_path):
+    with pytest.raises(
+        CP2KExecutionError,
+        match="CP2K module cannot be empty",
+    ):
+        build_archer2_cp2k_job(
+            calculation_id="igzo_sp",
+            working_directory=tmp_path,
+            input_file=Path("igzo.inp"),
+            output_file=Path("igzo.out"),
+            account="e05",
+            module="   ",
+        )
+
+
+def test_archer2_cp2k_empty_executable_rejected(tmp_path):
+    with pytest.raises(
+        CP2KExecutionError,
+        match="CP2K executable cannot be empty",
+    ):
+        build_archer2_cp2k_job(
+            calculation_id="igzo_sp",
+            working_directory=tmp_path,
+            input_file=Path("igzo.inp"),
+            output_file=Path("igzo.out"),
+            account="e05",
+            executable="   ",
+        )
