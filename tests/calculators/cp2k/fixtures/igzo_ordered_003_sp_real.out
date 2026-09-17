@@ -1,0 +1,13 @@
+ CP2K| version string:                                       CP2K version 2025.2
+ GLOBAL| Project name                                        igzo_ordered_003_sp
+ GLOBAL| Run type                                                         ENERGY
+ DFT| Multiplicity                                                             1
+ DFT| Charge                                                                   0
+  *** SCF run converged in     2 steps ***
+ ENERGY| Total FORCE_EVAL ( QS ) energy [hartree]           -767.248205609001843
+
+ The number of warnings for this run is : 0
+
+  **** **** ******  **  PROGRAM ENDED AT                 2026-08-25 11:45:10.437
+ ***** ** ***  *** **   PROGRAM RAN ON                                 nid001574
+ **    ****   ******    PROGRAM RAN BY                                   uccatco

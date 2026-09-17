@@ -1,0 +1,24 @@
+ CP2K| version string: CP2K version 2026.2
+ CP2K| source code revision number: git:1234567
+
+ GLOBAL| Project name                                                sio2-bulk
+ GLOBAL| Run type                                                       ENERGY
+
+ DFT| Charge                                                                 0
+ DFT| Multiplicity                                                           1
+
+ SCF WAVEFUNCTION OPTIMIZATION
+
+  Step     Update method      Time    Convergence         Total energy    Change
+  ------------------------------------------------------------------------------
+     1 OT DIIS     0.15E+00    0.8     0.10000000       -100.0000000000
+     2 OT DIIS     0.10E-02    0.8     0.01000000        -101.0000000000
+     3 OT DIIS     0.10E-06    0.8     0.00000100        -101.2345678900
+
+  *** SCF run converged in     3 steps ***
+
+ ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]:             -101.234567890000
+
+ PROGRAM ENDED AT                 2026-09-17 00:30:00.000
+ PROGRAM RAN ON                                      petersham
+ PROGRAM RAN BY                                      teocobos
