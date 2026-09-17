@@ -115,6 +115,7 @@ def adapt_cp2k_result(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     execution_result: ExecutionResult | None = None,
+    execution_provenance: ExecutionProvenance | None = None,
     calculation_id: str | None = None,
     nsdw_version: str = "0.1.0",
     platform: ExecutionPlatform = ExecutionPlatform.LOCAL,
@@ -171,38 +172,39 @@ def adapt_cp2k_result(
         else ()
     )
 
-    execution_provenance = ExecutionProvenance(
-        platform=platform,
-        scheduler=scheduler,
-        host=(
-            execution_result.host
-            if execution_result is not None
-            else None
-        ),
-        job_id=(
-            execution_result.job_id
-            if execution_result is not None
-            else None
-        ),
-        command=(
-            " ".join(execution_result.command)
-            if (
-                execution_result is not None
-                and execution_result.command
-            )
-            else None
-        ),
-        started_at=(
-            execution_result.started_at
-            if execution_result is not None
-            else None
-        ),
-        completed_at=(
-            execution_result.completed_at
-            if execution_result is not None
-            else None
-        ),
-    )
+    if execution_provenance is None:
+        execution_provenance = ExecutionProvenance(
+            platform=platform,
+            scheduler=scheduler,
+            host=(
+                execution_result.host
+                if execution_result is not None
+                else None
+            ),
+            job_id=(
+                execution_result.job_id
+                if execution_result is not None
+                else None
+            ),
+            command=(
+                " ".join(execution_result.command)
+                if (
+                    execution_result is not None
+                    and execution_result.command
+                )
+                else None
+            ),
+            started_at=(
+                execution_result.started_at
+                if execution_result is not None
+                else None
+            ),
+            completed_at=(
+                execution_result.completed_at
+                if execution_result is not None
+                else None
+            ),
+        )
 
     return NSDWResult(
         calculation=CalculationMetadata(

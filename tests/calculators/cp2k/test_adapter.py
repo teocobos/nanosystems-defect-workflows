@@ -30,6 +30,11 @@ from nsdw.execution import (
     ExecutionResult,
     ExecutionState,
 )
+from nsdw.models.provenance import (
+    ExecutionPlatform,
+    ExecutionProvenance,
+    SchedulerType,
+)
 
 FIXTURES = (
     Path(__file__).parent
@@ -434,3 +439,37 @@ def test_adapter_records_execution_provenance():
     assert provenance.completed_at == (
         "2026-09-17T13:01:00+01:00"
     )
+
+def test_adapter_accepts_explicit_execution_provenance():
+    parsed = _completed_energy_result()
+
+    execution_provenance = ExecutionProvenance(
+        platform=ExecutionPlatform.ARCHER2,
+        scheduler=SchedulerType.SLURM,
+        host="login01",
+        job_id="123456",
+        command=(
+            "srun --hint=nomultithread "
+            "--distribution=block:block "
+            "cp2k.psmp -i test.inp -o test.out"
+        ),
+        started_at=None,
+        completed_at=None,
+    )
+
+    result = adapt_cp2k_result(
+        parsed,
+        calculation_id="archer2-test",
+        execution_provenance=execution_provenance,
+    )
+
+    assert result.provenance.execution == execution_provenance
+    assert (
+        result.provenance.execution.platform
+        == ExecutionPlatform.ARCHER2
+    )
+    assert (
+        result.provenance.execution.scheduler
+        == SchedulerType.SLURM
+    )
+    assert result.provenance.execution.job_id == "123456"
