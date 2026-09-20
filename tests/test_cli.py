@@ -211,3 +211,174 @@ def test_cli_cp2k_single_point_archer2_failure(
     assert "SLURM submission failed" in cli_result.stdout
 
     mock_workflow.assert_called_once()
+
+def test_cli_structure_validate_xyz_with_lattice(tmp_path: Path):
+    """Validate an XYZ structure using six CLI lattice parameters."""
+
+    xyz_file = tmp_path / "sio2.xyz"
+
+    xyz_file.write_text(
+        "3\n"
+        "Example SiO2\n"
+        "Si 0.0 0.0 0.0\n"
+        "O 1.6 0.0 0.0\n"
+        "O 0.0 1.6 0.0\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "validate",
+            str(xyz_file),
+            "--a", "10",
+            "--b", "11",
+            "--c", "12",
+            "--alpha", "90",
+            "--beta", "90",
+            "--gamma", "120",
+            "--format", "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert '"valid": true' in result.stdout.lower()
+
+def test_cli_structure_validate_rejects_incomplete_lattice(
+    tmp_path: Path,
+):
+    xyz_file = tmp_path / "sio2.xyz"
+
+    xyz_file.write_text(
+        "3\n"
+        "Example SiO2\n"
+        "Si 0.0 0.0 0.0\n"
+        "O 1.6 0.0 0.0\n"
+        "O 0.0 1.6 0.0\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "validate",
+            str(xyz_file),
+            "--a", "10",
+            "--b", "11",
+            "--c", "12",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "Supply all six lattice parameters" in result.output
+
+def test_cli_structure_symmetry_xyz_with_lattice(
+    tmp_path: Path,
+):
+    """Analyse symmetry for an XYZ file with an explicit cell."""
+
+    xyz_file = tmp_path / "silicon.xyz"
+
+    xyz_file.write_text(
+        "1\n"
+        "Single silicon atom in a cubic cell\n"
+        "Si 0.0 0.0 0.0\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "symmetry",
+            str(xyz_file),
+            "--a", "5",
+            "--b", "5",
+            "--c", "5",
+            "--alpha", "90",
+            "--beta", "90",
+            "--gamma", "90",
+            "--format", "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert '"space_group_number": 221' in result.stdout
+
+def test_cli_structure_supercell_xyz_with_lattice(
+    tmp_path: Path,
+):
+    """Search supercells for an XYZ structure with an explicit cell."""
+
+    xyz_file = tmp_path / "silicon.xyz"
+
+    xyz_file.write_text(
+        "1\n"
+        "Single silicon atom in a cubic cell\n"
+        "Si 0.0 0.0 0.0\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "supercell",
+            str(xyz_file),
+            "--a", "5",
+            "--b", "5",
+            "--c", "5",
+            "--alpha", "90",
+            "--beta", "90",
+            "--gamma", "90",
+            "--min-atoms", "8",
+            "--max-atoms", "8",
+            "--min-image-distance", "9",
+            "--max-scale", "2",
+            "--format", "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert '"command": "structure.supercell"' in result.stdout
+    assert '"acceptable": true' in result.stdout
+
+def test_cli_generate_vacancies_xyz_with_lattice(
+    tmp_path: Path,
+):
+    """Generate an oxygen vacancy from an XYZ structure with a cell."""
+
+    xyz_file = tmp_path / "sio2.xyz"
+    output_dir = tmp_path / "vacancies"
+
+    xyz_file.write_text(
+        "3\n"
+        "Example SiO2 structure\n"
+        "Si 0.0 0.0 0.0\n"
+        "O 1.6 0.0 0.0\n"
+        "O 0.0 1.6 0.0\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "defects",
+            "generate-vacancies",
+            str(xyz_file),
+            "--species", "O",
+            "--output", str(output_dir),
+            "--a", "10",
+            "--b", "10",
+            "--c", "10",
+            "--alpha", "90",
+            "--beta", "90",
+            "--gamma", "90",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Vacancy dataset generated" in result.output
+    assert output_dir.is_dir()

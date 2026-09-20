@@ -89,6 +89,28 @@ console = Console()
 
 __version__ = "0.1.0"
 
+def _resolve_lattice_parameters(
+    a: float | None,
+    b: float | None,
+    c: float | None,
+    alpha: float | None,
+    beta: float | None,
+    gamma: float | None,
+) -> tuple[float, float, float, float, float, float] | None:
+    """Return a complete lattice specification or reject a partial one."""
+
+    values = (a, b, c, alpha, beta, gamma)
+
+    if all(value is None for value in values):
+        return None
+
+    if any(value is None for value in values):
+        raise ValueError(
+            "Supply all six lattice parameters: "
+            "--a, --b, --c, --alpha, --beta, --gamma."
+        )
+
+    return (a, b, c, alpha, beta, gamma)
 
 def version_callback(value: bool) -> None:
     """Print the NSDW version and exit."""
@@ -150,14 +172,59 @@ def structure_validate(
         ),
         min=0.0,
     ),
+    a: float | None = typer.Option(
+        None,
+        "--a",
+        help="Lattice length a in angstrom.",
+    ),
+    b: float | None = typer.Option(
+        None,
+        "--b",
+        help="Lattice length b in angstrom.",
+    ),
+    c: float | None = typer.Option(
+        None,
+        "--c",
+        help="Lattice length c in angstrom.",
+    ),
+    alpha: float | None = typer.Option(
+        None,
+        "--alpha",
+        help="Lattice angle alpha in degrees.",
+    ),
+    beta: float | None = typer.Option(
+        None,
+        "--beta",
+        help="Lattice angle beta in degrees.",
+    ),
+    gamma: float | None = typer.Option(
+        None,
+        "--gamma",
+        help="Lattice angle gamma in degrees.",
+    ),
 ) -> None:
     """
     Parse and validate a periodic atomic structure.
+
+    CIF files use their existing lattice. Standard XYZ files require
+    six explicit lattice parameters in angstroms and degrees.
     """
 
     try:
+        # Resolve the optional six-parameter lattice specification.
+        lattice_parameters = _resolve_lattice_parameters(
+            a=a,
+            b=b,
+            c=c,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+        )
+
+        # Load the structure using its CIF cell or the supplied XYZ cell.
         structure, parser_warnings = load_structure(
-            file
+            file,
+            lattice_parameters=lattice_parameters,
         )
 
         summary = summarise_structure(
@@ -175,57 +242,38 @@ def structure_validate(
             validation=validation,
             parser_warnings=parser_warnings,
             nsdw_version=__version__,
-            minimum_distance_threshold=(
-                min_distance
-            ),
+            minimum_distance_threshold=min_distance,
         )
 
-    except (
-        FileNotFoundError,
-        StructureParseError,
-    ) as exc:
+    except typer.Exit:
+        raise
+
+    except (FileNotFoundError, StructureParseError, ValueError) as exc:
         console.print(
             f"[bold red]ERROR:[/bold red] {exc}"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2) from exc
 
     if output_format == "json":
-        rendered = result.model_dump_json(
-            indent=2
-        )
+        json_text = result.model_dump_json(indent=2)
 
-        if output is None:
-            typer.echo(rendered)
-
-        else:
-            output = (
-                output
-                .expanduser()
-                .resolve()
-            )
-
+        if output is not None:
             output.parent.mkdir(
                 parents=True,
                 exist_ok=True,
             )
-
             output.write_text(
-                rendered + "\n",
+                json_text + "\n",
                 encoding="utf-8",
             )
-
-            console.print(
-                f"[green]✓[/green] "
-                f"JSON result written to: "
-                f"{output}"
-            )
+        else:
+            console.print(json_text)
 
     else:
         if output is not None:
             console.print(
                 "[bold red]ERROR:[/bold red] "
-                "--output currently requires "
-                "--format json."
+                "--output currently requires --format json."
             )
             raise typer.Exit(code=2)
 
@@ -247,7 +295,7 @@ def structure_validate(
 def structure_symmetry(
     file: Path = typer.Argument(
         ...,
-        help="Path to a periodic structure file.",
+        help="Path to a CIF or XYZ structure file.",
     ),
     element: str | None = typer.Option(
         None,
@@ -284,14 +332,57 @@ def structure_symmetry(
         "-o",
         help="Write the result to a file.",
     ),
+    a: float | None = typer.Option(
+        None,
+        "--a",
+        help="Lattice length a in angstrom.",
+    ),
+    b: float | None = typer.Option(
+        None,
+        "--b",
+        help="Lattice length b in angstrom.",
+    ),
+    c: float | None = typer.Option(
+        None,
+        "--c",
+        help="Lattice length c in angstrom.",
+    ),
+    alpha: float | None = typer.Option(
+        None,
+        "--alpha",
+        help="Lattice angle alpha in degrees.",
+    ),
+    beta: float | None = typer.Option(
+        None,
+        "--beta",
+        help="Lattice angle beta in degrees.",
+    ),
+    gamma: float | None = typer.Option(
+        None,
+        "--gamma",
+        help="Lattice angle gamma in degrees.",
+    ),
 ) -> None:
     """
     Analyse crystallographic symmetry.
+
+    CIF files use their existing lattice. Standard XYZ files require
+    six explicit lattice parameters in angstroms and degrees.
     """
 
     try:
+        lattice_parameters = _resolve_lattice_parameters(
+            a=a,
+            b=b,
+            c=c,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+        )
+
         structure, parser_warnings = load_structure(
-            file
+            file,
+            lattice_parameters=lattice_parameters,
         )
 
         symmetry = analyse_symmetry(
@@ -312,12 +403,14 @@ def structure_symmetry(
         FileNotFoundError,
         StructureParseError,
         SymmetryAnalysisError,
+        ValueError,
     ) as exc:
         console.print(
             f"[bold red]ERROR:[/bold red] {exc}"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
+    # Keep your existing JSON and text rendering below this point.
     if output_format == "json":
         rendered = result.model_dump_json(
             indent=2
@@ -373,7 +466,7 @@ def structure_symmetry(
 def structure_supercell(
     file: Path = typer.Argument(
         ...,
-        help="Path to a periodic structure file.",
+        help="Path to a CIF or XYZ structure file.",
     ),
     min_atoms: int = typer.Option(
         50,
@@ -435,14 +528,57 @@ def structure_supercell(
         "-o",
         help="Write the result to a file.",
     ),
+    a: float | None = typer.Option(
+        None,
+        "--a",
+        help="Lattice length a in angstrom.",
+    ),
+    b: float | None = typer.Option(
+        None,
+        "--b",
+        help="Lattice length b in angstrom.",
+    ),
+    c: float | None = typer.Option(
+        None,
+        "--c",
+        help="Lattice length c in angstrom.",
+    ),
+    alpha: float | None = typer.Option(
+        None,
+        "--alpha",
+        help="Lattice angle alpha in degrees.",
+    ),
+    beta: float | None = typer.Option(
+        None,
+        "--beta",
+        help="Lattice angle beta in degrees.",
+    ),
+    gamma: float | None = typer.Option(
+        None,
+        "--gamma",
+        help="Lattice angle gamma in degrees.",
+    ),
 ) -> None:
     """
     Search and evaluate candidate diagonal supercells.
+
+    CIF files use their existing lattice. Standard XYZ files require
+    six explicit lattice parameters in angstroms and degrees.
     """
 
     try:
+        lattice_parameters = _resolve_lattice_parameters(
+            a=a,
+            b=b,
+            c=c,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+        )
+
         structure, parser_warnings = load_structure(
-            file
+            file,
+            lattice_parameters=lattice_parameters,
         )
 
         search = search_supercells(
@@ -465,11 +601,12 @@ def structure_supercell(
         FileNotFoundError,
         StructureParseError,
         SupercellSearchError,
+        ValueError,
     ) as exc:
         console.print(
             f"[bold red]ERROR:[/bold red] {exc}"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     if output_format == "json":
         rendered = result.model_dump_json(
@@ -529,7 +666,7 @@ def generate_vacancies_command(
         ...,
         help=(
             "Path to the ordered periodic parent "
-            "structure."
+            "structure (CIF or XYZ)."
         ),
     ),
     species: str = typer.Option(
@@ -576,16 +713,57 @@ def generate_vacancies_command(
             "output dataset."
         ),
     ),
+    a: float | None = typer.Option(
+        None,
+        "--a",
+        help="Lattice length a in angstrom.",
+    ),
+    b: float | None = typer.Option(
+        None,
+        "--b",
+        help="Lattice length b in angstrom.",
+    ),
+    c: float | None = typer.Option(
+        None,
+        "--c",
+        help="Lattice length c in angstrom.",
+    ),
+    alpha: float | None = typer.Option(
+        None,
+        "--alpha",
+        help="Lattice angle alpha in degrees.",
+    ),
+    beta: float | None = typer.Option(
+        None,
+        "--beta",
+        help="Lattice angle beta in degrees.",
+    ),
+    gamma: float | None = typer.Option(
+        None,
+        "--gamma",
+        help="Lattice angle gamma in degrees.",
+    ),
 ) -> None:
     """
     Generate symmetry-inequivalent neutral vacancy structures.
+
+    CIF files use their existing lattice. Standard XYZ files require
+    six explicit lattice parameters in angstroms and degrees.
     """
 
     try:
-        structure, parser_warnings = (
-            load_structure(
-                file
-            )
+        lattice_parameters = _resolve_lattice_parameters(
+            a=a,
+            b=b,
+            c=c,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+        )
+
+        structure, parser_warnings = load_structure(
+            file,
+            lattice_parameters=lattice_parameters,
         )
 
         generation = (
@@ -613,11 +791,12 @@ def generate_vacancies_command(
         StructureParseError,
         DefectGenerationError,
         DefectExportError,
+        ValueError,
     ) as exc:
         console.print(
             f"[bold red]ERROR:[/bold red] {exc}"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     console.print(
         "\n[bold green]"
