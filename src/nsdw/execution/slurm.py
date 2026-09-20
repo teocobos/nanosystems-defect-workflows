@@ -122,6 +122,8 @@ class SlurmJob(BaseModel):
     modules: tuple[str, ...] = ()
     environment: dict[str, str | ShellVariable] = {}
 
+    export: str | None = None
+
     stdout_file: Path | None = None
     stderr_file: Path | None = None
 
@@ -179,6 +181,11 @@ def render_slurm_script(job: SlurmJob) -> str:
     if resources.qos is not None:
         lines.append(
             f"#SBATCH --qos={resources.qos}"
+        )
+
+    if job.export is not None:
+        lines.append(
+            f"#SBATCH --export={job.export}"
         )
 
     if job.stdout_file is not None:

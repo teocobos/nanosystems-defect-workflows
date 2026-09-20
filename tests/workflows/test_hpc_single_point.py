@@ -93,6 +93,7 @@ def test_submit_cp2k_single_point_archer2(
         tasks_per_node=128,
         cpus_per_task=1,
         walltime="01:00:00",
+        qos="standard",
         module="cp2k",
         executable="cp2k.psmp",
     )
@@ -156,6 +157,7 @@ def test_submit_cp2k_single_point_archer2_custom_module(
         tasks_per_node=128,
         cpus_per_task=1,
         walltime="01:00:00",
+        qos="standard",
         module="cp2k/cp2k-2025.2",
         executable="cp2k.psmp",
     )
@@ -411,6 +413,7 @@ def test_run_cp2k_single_point_archer2(
         tasks_per_node=128,
         cpus_per_task=1,
         walltime="01:00:00",
+        qos="standard",
         module="cp2k",
         executable="cp2k.psmp",
         executor=executor,
@@ -519,7 +522,68 @@ def test_run_cp2k_single_point_archer2_custom_module(
         tasks_per_node=128,
         cpus_per_task=1,
         walltime="01:00:00",
+        qos="standard",
         module="cp2k/cp2k-2025.2",
         executable="cp2k.psmp",
         executor=executor,
     )
+
+@patch(
+    "nsdw.workflows.hpc_single_point."
+    "build_archer2_cp2k_job"
+)
+def test_submit_cp2k_single_point_archer2_short_qos(
+    mock_build_job,
+):
+    executor = Mock()
+
+    job = SlurmJob(
+        name="sio2_sp_archer2",
+        calculation_id="sio2_sp_archer2",
+        working_directory=Path("/work/test"),
+        command=("srun", "cp2k.psmp"),
+        resources=SlurmResources(
+            nodes=1,
+            tasks_per_node=128,
+            cpus_per_task=1,
+            walltime="00:20:00",
+            account="e05-bulk-shl",
+            partition="standard",
+            qos="short",
+        ),
+    )
+
+    mock_build_job.return_value = job
+    executor.submit.return_value = _submission()
+
+    result = submit_cp2k_single_point_archer2(
+        calculation_id="sio2_sp_archer2",
+        working_directory=Path("/work/test"),
+        input_file=Path("sio2_sp.inp"),
+        output_file=Path("sio2_sp.out"),
+        account="e05-bulk-shl",
+        nodes=1,
+        tasks_per_node=128,
+        walltime="00:20:00",
+        qos="short",
+        module="cp2k/cp2k-2025.2",
+        executor=executor,
+    )
+
+    mock_build_job.assert_called_once_with(
+        calculation_id="sio2_sp_archer2",
+        working_directory=Path("/work/test"),
+        input_file=Path("sio2_sp.inp"),
+        output_file=Path("sio2_sp.out"),
+        account="e05-bulk-shl",
+        nodes=1,
+        tasks_per_node=128,
+        cpus_per_task=1,
+        walltime="00:20:00",
+        qos="short",
+        module="cp2k/cp2k-2025.2",
+        executable="cp2k.psmp",
+    )
+
+    executor.submit.assert_called_once_with(job)
+    assert result.job.resources.qos == "short"

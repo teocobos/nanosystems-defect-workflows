@@ -76,6 +76,7 @@ def build_archer2_cp2k_job(
     tasks_per_node: int = 128,
     cpus_per_task: int = 1,
     walltime: str = "01:00:00",
+    qos: str = "standard",
     module: str = "cp2k",
     executable: str = "cp2k.psmp",
 ) -> SlurmJob:
@@ -107,5 +108,6 @@ def build_archer2_cp2k_job(
         tasks_per_node=tasks_per_node,
         cpus_per_task=cpus_per_task,
         walltime=walltime,
+        qos=qos,
         modules=(f"load {module}",),
     )

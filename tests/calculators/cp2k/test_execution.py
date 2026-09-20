@@ -212,6 +212,29 @@ def test_render_archer2_cp2k_script(tmp_path):
         in script
     )
 
+def test_render_archer2_cp2k_short_script(tmp_path):
+    job = build_archer2_cp2k_job(
+        calculation_id="sio2_sp_archer2",
+        working_directory=tmp_path,
+        input_file=Path("sio2_sp.inp"),
+        output_file=Path("sio2_sp.out"),
+        account="e05-bulk-shl",
+        nodes=1,
+        tasks_per_node=128,
+        walltime="00:20:00",
+        qos="short",
+        module="cp2k/cp2k-2025.2",
+    )
+
+    script = render_slurm_script(job)
+
+    assert "#SBATCH --account=e05-bulk-shl" in script
+    assert "#SBATCH --partition=standard" in script
+    assert "#SBATCH --qos=short" in script
+    assert "#SBATCH --time=00:20:00" in script
+    assert "module load cp2k/cp2k-2025.2" in script
+    assert "cp2k.psmp -i sio2_sp.inp -o sio2_sp.out" in script
+
 def test_build_archer2_cp2k_job_versioned_module(
     tmp_path,
 ):
