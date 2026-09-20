@@ -43,6 +43,11 @@ from nsdw.workflows import (
     SinglePointWorkflowError,
     run_cp2k_single_point,
 )
+from nsdw.execution.monitor import SlurmMonitorConfig
+from nsdw.workflows.hpc_single_point import (
+    HPCSinglePointWorkflowError,
+    run_cp2k_single_point_archer2,
+)
 
 app = typer.Typer(
     name="nsdw",
@@ -812,6 +817,159 @@ def workflow_single_point(
         f"Result:          "
         f"{destination.resolve()}"
     )
+
+@workflow_app.command("single-point-archer2")
+def workflow_single_point_archer2(
+    workdir: Path = typer.Option(
+        Path("."),
+        "--workdir",
+        "-w",
+        help="Calculation working directory.",
+    ),
+    input_file: Path = typer.Option(
+        ...,
+        "--input",
+        "-i",
+        help="CP2K input file.",
+    ),
+    output_file: Path = typer.Option(
+        Path("calculation.out"),
+        "--output",
+        "-o",
+        help="CP2K output file.",
+    ),
+    result_file: Path = typer.Option(
+        Path("result.json"),
+        "--result",
+        "-r",
+        help="NSDW result JSON file.",
+    ),
+    calculation_id: str | None = typer.Option(
+        None,
+        "--id",
+        help="Calculation identifier.",
+    ),
+    account: str = typer.Option(
+        ...,
+        "--account",
+        help="ARCHER2 SLURM account.",
+    ),
+    qos: str = typer.Option(
+        "standard",
+        "--qos",
+        help="SLURM quality of service.",
+    ),
+    walltime: str = typer.Option(
+        "01:00:00",
+        "--walltime",
+        help="Job walltime (HH:MM:SS).",
+    ),
+    nodes: int = typer.Option(
+        1,
+        "--nodes",
+        min=1,
+        help="Number of compute nodes.",
+    ),
+    tasks_per_node: int = typer.Option(
+        128,
+        "--tasks-per-node",
+        min=1,
+        help="MPI tasks per node.",
+    ),
+    cpus_per_task: int = typer.Option(
+        1,
+        "--cpus-per-task",
+        min=1,
+        help="CPUs per task.",
+    ),
+    module: str = typer.Option(
+        "cp2k",
+        "--module",
+        help="CP2K environment module.",
+    ),
+    executable: str = typer.Option(
+        "cp2k.psmp",
+        "--executable",
+        help="CP2K executable.",
+    ),
+    poll_interval: float = typer.Option(
+        10.0,
+        "--poll-interval",
+        min=0.1,
+        help="SLURM polling interval in seconds.",
+    ),
+    timeout: float = typer.Option(
+        1800.0,
+        "--timeout",
+        min=0.1,
+        help="Monitoring timeout in seconds.",
+    ),
+) -> None:
+    """Submit, monitor, and collect a CP2K single-point job on ARCHER2."""
+
+    workdir = workdir.expanduser().resolve()
+
+    if calculation_id is None:
+        calculation_id = input_file.stem
+
+    try:
+        result = run_cp2k_single_point_archer2(
+            calculation_id=calculation_id,
+            working_directory=workdir,
+            input_file=input_file,
+            output_file=output_file,
+            account=account,
+            nodes=nodes,
+            tasks_per_node=tasks_per_node,
+            cpus_per_task=cpus_per_task,
+            walltime=walltime,
+            qos=qos,
+            module=module,
+            executable=executable,
+            result_file=result_file,
+            monitor_config=SlurmMonitorConfig(
+                poll_interval=poll_interval,
+                timeout=timeout,
+            ),
+        )
+
+    except (
+        FileNotFoundError,
+        HPCSinglePointWorkflowError,
+        RuntimeError,
+    ) as exc:
+        console.print(
+            f"[bold red]ERROR:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        "\n[bold green]"
+        "ARCHER2 single-point workflow completed"
+        "[/bold green]\n"
+    )
+
+    console.print(f"Calculation ID:  {result.calculation.id}")
+    console.print(f"Status:          {result.calculation.status.value}")
+
+    if result.energy is not None and result.energy.total is not None:
+        console.print(
+            f"Total energy:    "
+            f"{result.energy.total.value:.8f} "
+            f"{result.energy.total.unit}"
+        )
+
+    console.print(
+        f"SLURM job ID:    {result.provenance.execution.job_id}"
+    )
+
+    destination = (
+        result_file
+        if result_file.is_absolute()
+        else workdir / result_file
+    )
+
+    console.print(f"Result:          {destination.resolve()}")
 
 if __name__ == "__main__":
     app()
