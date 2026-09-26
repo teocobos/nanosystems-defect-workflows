@@ -126,6 +126,79 @@ an existing non-empty output dataset.
 
 For a CIF input, omit the six lattice options.
 
+## Material project scaffolding
+
+NSDW can initialise a standard material-modelling project for collaborative
+and reproducible research.
+
+For example:
+
+```bash
+nsdw project init igzo-defect-modelling \
+    --material IGZO \
+    --with cp2k \
+    --with vasp \
+    --git
+```
+
+Optional modelling components are:
+
+- `cp2k`
+- `vasp`
+- `lammps`
+- `mace`
+
+Use `--with` more than once to enable multiple components. MACE support is
+optional; initialising a project with `--with mace` does not install MACE,
+PyTorch, or other machine-learning dependencies.
+
+A generated project separates shared research records from active calculation
+work:
+
+```text
+igzo-defect-modelling/
+├── README.md
+├── project.yaml
+├── docs/
+├── structures/
+│   ├── raw/
+│   ├── validated/
+│   ├── supercells/
+│   └── defects/
+├── calculations/
+│   ├── cp2k/
+│   └── vasp/
+├── working/
+│   └── calculations/
+│       ├── cp2k/
+│       └── vasp/
+├── workflows/
+└── reports/
+```
+
+`working/calculations/` is intended for active calculations, HPC scratch data,
+restart files, wavefunctions, and other potentially large or machine-specific
+artefacts. It is ignored by Git.
+
+`calculations/` is intended for selected reproducible inputs, resolved
+configurations, manifests, and extracted results that can be shared with
+collaborators and committed to the project repository.
+
+Shareable empty directories are preserved with `.gitkeep` files so that the
+project structure survives a Git clone.
+
+The optional `--git` flag initialises a local Git repository using `main` as
+the initial branch. NSDW does not automatically stage, commit, configure a
+remote, or push research files.
+
+To create a project without Git:
+
+```bash
+nsdw project init sio2-defects \
+    --material SiO2 \
+    --with cp2k
+```
+
 ## CP2K single-point workflows
 
 NSDW can execute an **existing CP2K input file**. These commands do

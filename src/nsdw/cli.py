@@ -1,12 +1,23 @@
 from pathlib import Path
 from typing import Literal
+from pydantic import ValidationError
 
 import typer
 from rich.console import Console
 
+from nsdw.project.models import ProjectConfig
+
+from nsdw.project.scaffold import (
+    ProjectScaffoldError,
+    create_project,
+)
 from nsdw.defects.exporter import (
     DefectExportError,
     export_vacancy_dataset,
+)
+from nsdw.project.git import (
+    ProjectGitError,
+    initialise_git_repository,
 )
 from nsdw.output.builders import (
     build_structure_symmetry_output,
@@ -70,6 +81,11 @@ workflow_app = typer.Typer(
     no_args_is_help=True,
 )
 
+project_app = typer.Typer(
+    help="Create and manage NSDW material projects.",
+    no_args_is_help=True,
+)
+
 app.add_typer(
     structure_app,
     name="structure",
@@ -85,9 +101,132 @@ app.add_typer(
     name="workflow",
 )
 
+app.add_typer(
+    project_app,
+    name="project",
+)
+
 console = Console()
 
 __version__ = "0.1.0"
+
+@project_app.command("init")
+def project_init(
+    name: str = typer.Argument(
+        ...,
+        help="Name of the new NSDW material project.",
+    ),
+    material: str = typer.Option(
+        ...,
+        "--material",
+        "-m",
+        help="Material or material system studied by the project.",
+    ),
+    components: list[str] | None = typer.Option(
+        None,
+        "--with",
+        help=(
+            "Optional modelling component to enable "
+            "(cp2k, vasp, lammps, or mace). "
+            "Repeat for multiple components."
+        ),
+    ),
+    directory: Path | None = typer.Option(
+        None,
+        "--directory",
+        "-d",
+        help=(
+            "Directory in which to create the project. "
+            "Defaults to the project name."
+        ),
+    ),
+    initialise_git: bool = typer.Option(
+        False,
+        "--git",
+        help=(
+            "Initialise the project as a Git repository "
+            "with main as the initial branch."
+        ),
+    ),
+) -> None:
+    """Create a new NSDW material-modelling project."""
+
+    selected_components = components or []
+
+    try:
+        config = ProjectConfig(
+            name=name,
+            material=material,
+            nsdw_version=__version__,
+            components=selected_components,
+        )
+    except ValidationError as exc:
+        allowed = "cp2k, vasp, lammps, mace"
+
+        console.print(
+            "[bold red]Error:[/bold red] "
+            "Invalid project component."
+        )
+        console.print(
+            f"Allowed components: {allowed}"
+        )
+
+        raise typer.Exit(code=2) from exc
+
+    root = directory if directory is not None else Path(name)
+
+    try:
+        created_root = create_project(
+            root=root,
+            config=config,
+        )
+    except ProjectScaffoldError as exc:
+        console.print(
+            f"[bold red]Error:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    if initialise_git:
+        try:
+            initialise_git_repository(
+                created_root,
+            )
+        except ProjectGitError as exc:
+            console.print(
+                f"[bold red]Git error:[/bold red] {exc}"
+            )
+            raise typer.Exit(code=1) from exc
+
+    console.print(
+        "[bold green]Created NSDW project:[/bold green] "
+        f"{created_root}"
+    )
+
+    console.print(
+        f"Material: {config.material}"
+    )
+
+    if initialise_git:
+        console.print(
+            "Git: initialised on branch main"
+        )
+
+    if config.components:
+        console.print(
+            "Components: "
+            + ", ".join(config.components)
+        )
+    else:
+        console.print(
+            "Components: none"
+        )
+
+    console.print(
+        "\nNext:"
+    )
+    console.print(
+        f"  cd {created_root}"
+    )
 
 def _resolve_lattice_parameters(
     a: float | None,
