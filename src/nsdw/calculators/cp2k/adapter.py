@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from pymatgen.core import Structure
 
 from nsdw.calculators.cp2k.models import (
     CP2KRunType,
@@ -36,6 +37,8 @@ from nsdw.provenance.files import (
 )
 
 from nsdw.execution.models import ExecutionResult
+
+from nsdw.structures.result import build_structure_result
 
 HARTREE_TO_EV = 27.211386245988
 
@@ -111,6 +114,7 @@ def _build_energy(
 def adapt_cp2k_result(
     parsed: ParsedCP2KResult,
     *,
+    structure: Structure | None = None,
     input_settings: ParsedCP2KInput | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
@@ -212,6 +216,11 @@ def adapt_cp2k_result(
             type=calculation_type,
             status=calculation_status,
             backend=Backend.CP2K,
+        ),
+        structure=(
+            build_structure_result(structure)
+            if structure is not None
+            else None
         ),
         energy=_build_energy(parsed),
         provenance=ProvenanceResult(

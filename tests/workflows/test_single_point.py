@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from pymatgen.core import Lattice, Structure
+
 from nsdw.models.calculation import (
     Backend,
     CalculationStatus,
@@ -134,6 +136,44 @@ def test_cp2k_single_point_workflow(
         result.provenance.output_files
     ) == 1
 
+def test_cp2k_single_point_workflow_includes_structure(
+    tmp_path,
+):
+    executable = tmp_path / "fake_cp2k"
+    input_path = tmp_path / "test.inp"
+
+    _write_fake_cp2k(executable)
+    _write_cp2k_input(input_path)
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["Si", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+        ],
+    )
+
+    result = run_cp2k_single_point(
+        calculation_id="test_sp",
+        working_directory=tmp_path,
+        input_file="test.inp",
+        output_file="test.out",
+        executable=str(executable),
+        structure=structure,
+    )
+
+    assert result.structure is not None
+    assert result.structure.n_atoms == 2
+    assert result.structure.periodic is True
+    assert len(result.structure.structure_hash) == 64
+
+    result_json = (
+        tmp_path / "result.json"
+    ).read_text(encoding="utf-8")
+
+    assert '"structure"' in result_json
+    assert result.structure.structure_hash in result_json
 
 def test_cp2k_single_point_failure(
     tmp_path,

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pymatgen.core import Structure
+
 from nsdw.calculators.cp2k import (
     adapt_cp2k_result,
     build_cp2k_execution_request,
@@ -27,6 +29,7 @@ class SinglePointWorkflowError(RuntimeError):
 
 def run_cp2k_single_point(
     *,
+    structure: Structure | None = None,
     calculation_id: str,
     working_directory: str | Path,
     input_file: str | Path,
@@ -88,6 +91,7 @@ def run_cp2k_single_point(
 
     result = adapt_cp2k_result(
         parsed_output,
+        structure=structure,
         input_settings=parsed_input,
         input_path=input_path,
         output_path=output_path,

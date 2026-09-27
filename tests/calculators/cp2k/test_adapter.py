@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from pymatgen.core import Lattice, Structure
+
 from nsdw.calculators.cp2k import (
     CP2KRunType,
     CP2KSCFStatus,
@@ -105,6 +107,42 @@ def test_adapter_converts_hartree_to_ev():
         )
     )
 
+def test_adapter_includes_structure_result_when_structure_supplied():
+    parsed = _completed_energy_result()
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["Si", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+        ],
+    )
+
+    result = adapt_cp2k_result(
+        parsed,
+        structure=structure,
+    )
+
+    assert result.structure is not None
+
+    assert (
+        result.structure.formula
+        == structure.composition.formula
+    )
+
+    assert result.structure.n_atoms == 2
+    assert result.structure.periodic is True
+
+    assert result.structure.volume == pytest.approx(
+        structure.volume
+    )
+
+    assert result.structure.density == pytest.approx(
+        structure.density
+    )
+
+    assert len(result.structure.structure_hash) == 64
 
 def test_adapter_builds_cp2k_provenance():
     parsed = _completed_energy_result()
