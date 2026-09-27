@@ -138,20 +138,55 @@ def _parse_k_points(
 def _parse_xc_functional(
     text: str,
 ) -> str | None:
-    match = re.search(
-        r"&XC_FUNCTIONAL(?:\s+([^\s&]+))?",
+    """Parse the exchange-correlation functional from CP2K input."""
+
+    section = _section(
+        text,
+        "XC_FUNCTIONAL",
+    )
+
+    # Handle named compact forms such as:
+    #
+    # &XC_FUNCTIONAL PBE
+    # &END XC_FUNCTIONAL
+    named_match = re.search(
+        r"&XC_FUNCTIONAL\s+([^\s&]+)",
         text,
         re.IGNORECASE,
     )
 
-    if match is None:
+    if named_match is not None:
+        return named_match.group(1)
+
+    if section is None:
         return None
 
-    return (
-        match.group(1)
-        if match.group(1)
-        else None
-    )
+    upper_section = section.upper()
+
+    # Explicit PBEsol form:
+    #
+    # &XC_FUNCTIONAL
+    #   &GGA_X_PBE_SOL
+    #   &END GGA_X_PBE_SOL
+    #   &GGA_C_PBE_SOL
+    #   &END GGA_C_PBE_SOL
+    # &END XC_FUNCTIONAL
+    if (
+        "&GGA_X_PBE_SOL" in upper_section
+        and "&GGA_C_PBE_SOL" in upper_section
+    ):
+        return "PBEsol"
+
+    # Explicit PBE exchange/correlation form.
+    if (
+        "&GGA_X_PBE" in upper_section
+        and "&GGA_C_PBE" in upper_section
+        and "&GGA_X_PBE_SOL" not in upper_section
+        and "&GGA_C_PBE_SOL" not in upper_section
+    ):
+        return "PBE"
+
+    return None
 
 
 def _parse_kinds(
