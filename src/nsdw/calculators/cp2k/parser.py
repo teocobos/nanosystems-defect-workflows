@@ -9,6 +9,8 @@ from nsdw.calculators.cp2k.models import (
     CP2KRunType,
     CP2KSCFStatus,
     ParsedCP2KEnergy,
+    ParsedCP2KMultigrid,
+    ParsedCP2KMultigridLevel,
     ParsedCP2KResult,
     ParsedCP2KSCF,
 )
@@ -54,6 +56,19 @@ _SCF_NOT_CONVERGED_RE = re.compile(
     re.IGNORECASE,
 )
 
+_MULTIGRID_LEVEL_RE = re.compile(
+    r"count for grid\s+"
+    r"(\d+)\s*:\s*"
+    r"(\d+)\s+"
+    r"cutoff\s+\[a\.u\.\]\s+"
+    r"([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)",
+    re.IGNORECASE,
+)
+
+_MULTIGRID_TOTAL_RE = re.compile(
+    r"total gridlevel count\s*:\s*(\d+)",
+    re.IGNORECASE,
+)
 
 def _last_match(
     pattern: re.Pattern[str],
@@ -67,6 +82,68 @@ def _last_match(
         return None
 
     return matches[-1]
+
+def _parse_multigrid(
+    text: str,
+) -> ParsedCP2KMultigrid | None:
+    """
+    Parse the final CP2K MULTIGRID INFO block.
+
+    CP2K output may contain more than one MULTIGRID INFO block.
+    Only the final coherent block is retained, matching the parser's
+    existing final-value semantics for repeated calculation data.
+    """
+
+    marker = "MULTIGRID INFO"
+
+    marker_positions = [
+        match.start()
+        for match in re.finditer(
+            marker,
+            text,
+            re.IGNORECASE,
+        )
+    ]
+
+    if not marker_positions:
+        return None
+
+    final_block = text[
+        marker_positions[-1]:
+    ]
+
+    total_match = _MULTIGRID_TOTAL_RE.search(
+        final_block
+    )
+
+    if total_match is None:
+        return None
+
+    block_end = total_match.end()
+
+    final_block = final_block[:block_end]
+
+    level_matches = list(
+        _MULTIGRID_LEVEL_RE.finditer(
+            final_block
+        )
+    )
+
+    levels = tuple(
+        ParsedCP2KMultigridLevel(
+            grid_number=int(match.group(1)),
+            count=int(match.group(2)),
+            cutoff_au=float(match.group(3)),
+        )
+        for match in level_matches
+    )
+
+    return ParsedCP2KMultigrid(
+        levels=levels,
+        total_gridlevel_count=int(
+            total_match.group(1)
+        ),
+    )
 
 
 def parse_cp2k_text(text: str) -> ParsedCP2KResult:
@@ -84,6 +161,7 @@ def parse_cp2k_text(text: str) -> ParsedCP2KResult:
     run_type_match = _RUN_TYPE_RE.search(text)
     charge_match = _CHARGE_RE.search(text)
     multiplicity_match = _MULTIPLICITY_RE.search(text)
+    multigrid = _parse_multigrid(text)
 
     energy_match = _last_match(
         _ENERGY_RE,
@@ -191,6 +269,7 @@ def parse_cp2k_text(text: str) -> ParsedCP2KResult:
             status=scf_status,
             iterations=scf_iterations,
         ),
+        multigrid=multigrid,
         normal_termination=normal_termination,
         warnings=tuple(warnings),
     )

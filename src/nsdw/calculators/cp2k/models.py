@@ -49,6 +49,33 @@ class ParsedCP2KSCF(BaseModel):
     status: CP2KSCFStatus = CP2KSCFStatus.UNKNOWN
     iterations: int | None = Field(default=None, ge=0)
 
+class ParsedCP2KMultigridLevel(BaseModel):
+    """One grid level reported in CP2K MULTIGRID INFO."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
+
+    grid_number: int = Field(gt=0)
+    count: int = Field(ge=0)
+    cutoff_au: float = Field(gt=0)
+
+
+class ParsedCP2KMultigrid(BaseModel):
+    """Raw MULTIGRID INFO extracted from CP2K output."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
+
+    levels: tuple[ParsedCP2KMultigridLevel, ...] = ()
+    total_gridlevel_count: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
 
 class ParsedCP2KResult(BaseModel):
     """
@@ -77,6 +104,8 @@ class ParsedCP2KResult(BaseModel):
 
     energy: ParsedCP2KEnergy = ParsedCP2KEnergy()
     scf: ParsedCP2KSCF = ParsedCP2KSCF()
+    
+    multigrid: ParsedCP2KMultigrid | None = None
 
     normal_termination: bool = False
 

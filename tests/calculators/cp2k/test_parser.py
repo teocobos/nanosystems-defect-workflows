@@ -132,6 +132,102 @@ def test_unknown_run_type_generates_warning():
         "SOME_FUTURE_RUN_TYPE"
         in result.warnings
     )
+
+def test_parse_multigrid_info_from_real_igzo_format():
+    text = """
+ -------------------------------------------------------------------------------
+ ----                             MULTIGRID INFO                            ----
+ -------------------------------------------------------------------------------
+ count for grid        1:       65027435          cutoff [a.u.]          200.00
+ count for grid        2:       30531810          cutoff [a.u.]           66.67
+ count for grid        3:       17861146          cutoff [a.u.]           22.22
+ count for grid        4:        8080035          cutoff [a.u.]            7.41
+ total gridlevel count  :      121500426
+
+ ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: -767.248205609001843
+ SCF run converged in 2 steps
+ PROGRAM ENDED AT 2026-09-27
+ """
+
+    result = parse_cp2k_text(text)
+
+    assert result.multigrid is not None
+
+    assert len(result.multigrid.levels) == 4
+
+    assert result.multigrid.levels[0].grid_number == 1
+    assert result.multigrid.levels[0].count == 65027435
+    assert (
+        result.multigrid.levels[0].cutoff_au
+        == pytest.approx(200.00)
+    )
+
+    assert result.multigrid.levels[1].grid_number == 2
+    assert result.multigrid.levels[1].count == 30531810
+    assert (
+        result.multigrid.levels[1].cutoff_au
+        == pytest.approx(66.67)
+    )
+
+    assert result.multigrid.levels[2].grid_number == 3
+    assert result.multigrid.levels[2].count == 17861146
+    assert (
+        result.multigrid.levels[2].cutoff_au
+        == pytest.approx(22.22)
+    )
+
+    assert result.multigrid.levels[3].grid_number == 4
+    assert result.multigrid.levels[3].count == 8080035
+    assert (
+        result.multigrid.levels[3].cutoff_au
+        == pytest.approx(7.41)
+    )
+
+    assert (
+        result.multigrid.total_gridlevel_count
+        == 121500426
+    )
+
+def test_parser_uses_final_multigrid_block():
+    text = """
+ ----                             MULTIGRID INFO                            ----
+ count for grid        1:            100          cutoff [a.u.]          150.00
+ count for grid        2:             50          cutoff [a.u.]           50.00
+ total gridlevel count  :            150
+
+ ----                             MULTIGRID INFO                            ----
+ count for grid        1:            200          cutoff [a.u.]          200.00
+ count for grid        2:            100          cutoff [a.u.]           66.67
+ count for grid        3:             50          cutoff [a.u.]           22.22
+ total gridlevel count  :            350
+
+ ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: -20.0
+ SCF run converged in 2 steps
+ PROGRAM ENDED AT 2026-09-27
+ """
+
+    result = parse_cp2k_text(text)
+
+    assert result.multigrid is not None
+
+    assert len(result.multigrid.levels) == 3
+
+    assert result.multigrid.levels[0].grid_number == 1
+    assert result.multigrid.levels[0].count == 200
+    assert (
+        result.multigrid.levels[0].cutoff_au
+        == pytest.approx(200.00)
+    )
+
+    assert result.multigrid.levels[-1].grid_number == 3
+    assert result.multigrid.levels[-1].count == 50
+
+    assert (
+        result.multigrid.total_gridlevel_count
+        == 350
+    )
+
+
 def test_parse_real_igzo_cp2k_output():
     result = parse_cp2k_output(
         FIXTURES

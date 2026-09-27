@@ -8,6 +8,8 @@ from nsdw.calculators.cp2k.models import (
     ParsedCP2KSCF,
     ParsedCP2KInput,
     ParsedCP2KKind,
+    ParsedCP2KMultigrid,
+    ParsedCP2KMultigridLevel,
 )
 from nsdw.calculators.cp2k.parser import (
     CP2KParseError,
@@ -31,6 +33,8 @@ from nsdw.calculators.cp2k.execution import (
 )
 
 __all__ = [
+    "ParsedCP2KMultigrid",
+    "ParsedCP2KMultigridLevel",
     "CP2KRunType",
     "CP2KSCFStatus",
     "ParsedCP2KEnergy",
