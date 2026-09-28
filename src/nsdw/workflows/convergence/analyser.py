@@ -153,3 +153,93 @@ def analyse_convergence_energy(
             selected_candidate_label is not None
         ),
     )
+
+@dataclass(frozen=True)
+class ConvergenceReferenceComparison:
+    """Energy difference between a candidate and the reference."""
+
+    candidate_label: str
+    reference_candidate_label: str
+    energy_difference_ev_per_atom: float
+    within_energy_tolerance: bool
+
+
+@dataclass(frozen=True)
+class ConvergenceReferenceAnalysis:
+    """
+    Energy convergence relative to the highest-cost candidate.
+
+    The reference is the final candidate in the study.
+
+    A selected candidate satisfies the energy tolerance against
+    that reference. This is an energy-only assessment, not proof
+    of complete numerical convergence.
+    """
+
+    reference_candidate_label: str
+    selected_candidate_label: str | None
+    comparisons: tuple[ConvergenceReferenceComparison, ...]
+    energy_tolerance_satisfied: bool
+
+
+def analyse_convergence_against_reference(
+    study: ConvergenceStudyDefinition,
+    observations: list[ConvergenceObservation],
+) -> ConvergenceReferenceAnalysis:
+    """
+    Compare each candidate's energy against the highest-cost reference.
+
+    Reuse the generic analyser to validate candidate ordering,
+    structure hashes and atom counts.
+
+    The reference itself is excluded from selection because its
+    zero energy difference is true by definition and provides no
+    independent convergence evidence.
+    """
+
+    analyse_convergence_energy(
+        study,
+        observations,
+    )
+
+    reference = observations[-1]
+    reference_energy = reference.energy_ev_per_atom
+
+    tolerance = (
+        study.criterion.energy_tolerance_ev_per_atom
+    )
+
+    comparisons: list[ConvergenceReferenceComparison] = []
+
+    for observation in observations[:-1]:
+        difference = abs(
+            observation.energy_ev_per_atom
+            - reference_energy
+        )
+
+        comparisons.append(
+            ConvergenceReferenceComparison(
+                candidate_label=observation.candidate.label,
+                reference_candidate_label=reference.candidate.label,
+                energy_difference_ev_per_atom=difference,
+                within_energy_tolerance=(
+                    difference <= tolerance
+                ),
+            )
+        )
+
+    selected_candidate_label = None
+
+    for comparison in comparisons:
+        if comparison.within_energy_tolerance:
+            selected_candidate_label = comparison.candidate_label
+            break
+
+    return ConvergenceReferenceAnalysis(
+        reference_candidate_label=reference.candidate.label,
+        selected_candidate_label=selected_candidate_label,
+        comparisons=tuple(comparisons),
+        energy_tolerance_satisfied=(
+            selected_candidate_label is not None
+        ),
+    )
