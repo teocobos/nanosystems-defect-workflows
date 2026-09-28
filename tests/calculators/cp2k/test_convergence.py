@@ -23,6 +23,14 @@ from nsdw.calculators.cp2k.models import (
     ParsedCP2KResult,
     ParsedCP2KSCF,
 )
+from nsdw.calculators.cp2k.convergence import (
+    assess_cp2k_input_consistency,
+)
+
+from nsdw.calculators.cp2k.models import (
+    ParsedCP2KInput,
+    ParsedCP2KKind,
+)
 
 def make_multigrid(
     counts=(65027435, 30531810, 17861146, 8080035),
@@ -326,3 +334,365 @@ def test_convergence_rejects_geometry_optimisation():
 
     assert not assessment.valid
     assert any("ENERGY run" in issue for issue in assessment.issues)
+
+def make_convergence_input(
+    *,
+    cutoff=400.0,
+    relative_cutoff=60.0,
+    basis="DZVP-MOLOPT-SR-GTH",
+    potential="GTH-PBE-q6",
+    xc_functional="PBE",
+    eps_scf=1.0e-7,
+):
+    """Construct a CP2K input for convergence testing."""
+
+    return ParsedCP2KInput(
+        run_type=CP2KRunType.ENERGY,
+        charge=0,
+        multiplicity=1,
+        xc_functional=xc_functional,
+        cutoff_ry=cutoff,
+        relative_cutoff_ry=relative_cutoff,
+        eps_scf=eps_scf,
+        k_points=(1, 1, 1),
+        kinds=(
+            ParsedCP2KKind(
+                kind="O",
+                element="O",
+                basis_set=basis,
+                potential=potential,
+            ),
+        ),
+        basis_set_file="BASIS_MOLOPT",
+        potential_file="GTH_POTENTIALS",
+        admm=False,
+    )
+
+
+def test_cutoff_study_accepts_fixed_settings():
+    """Only CUTOFF changes between valid candidates."""
+
+    inputs = [
+        make_convergence_input(cutoff=400.0),
+        make_convergence_input(cutoff=500.0),
+        make_convergence_input(cutoff=600.0),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "cutoff",
+    )
+
+    assert assessment.consistent
+    assert assessment.issues == ()
+    assert assessment.varied_parameter == "cutoff"
+
+
+def test_cutoff_study_rejects_relative_cutoff_change():
+    """REL_CUTOFF must remain fixed during a CUTOFF study."""
+
+    inputs = [
+        make_convergence_input(cutoff=400.0),
+        make_convergence_input(
+            cutoff=500.0,
+            relative_cutoff=80.0,
+        ),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "cutoff",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "relative_cutoff_ry differs" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_cutoff_study_rejects_functional_change():
+    """The XC functional must remain fixed."""
+
+    inputs = [
+        make_convergence_input(cutoff=400.0),
+        make_convergence_input(
+            cutoff=500.0,
+            xc_functional="PBE0",
+        ),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "cutoff",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "xc_functional differs" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_cutoff_study_rejects_missing_settings():
+    """Missing required parsed settings must be reported."""
+
+    inputs = [
+        make_convergence_input(cutoff=400.0),
+        make_convergence_input(
+            cutoff=500.0,
+            eps_scf=None,
+        ),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "cutoff",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "eps_scf is missing" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_cutoff_study_rejects_unchanged_cutoff():
+    """A study must actually vary its selected parameter."""
+
+    inputs = [
+        make_convergence_input(cutoff=400.0),
+        make_convergence_input(cutoff=400.0),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "cutoff",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "does not vary" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_basis_study_allows_basis_changes():
+    """Basis convergence requires different basis assignments."""
+
+    inputs = [
+        make_convergence_input(
+            basis="DZVP-MOLOPT-SR-GTH",
+        ),
+        make_convergence_input(
+            basis="TZVP-MOLOPT-GTH",
+        ),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "basis",
+    )
+
+    assert assessment.consistent
+
+
+def test_basis_study_rejects_pseudopotential_changes():
+    """Changing the basis must not silently change the potential."""
+
+    inputs = [
+        make_convergence_input(
+            basis="DZVP-MOLOPT-SR-GTH",
+            potential="GTH-PBE-q6",
+        ),
+        make_convergence_input(
+            basis="TZVP-MOLOPT-GTH",
+            potential="GTH-PBE-q4",
+        ),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "basis",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "potential" in issue.lower()
+        for issue in assessment.issues
+    )
+
+
+def test_input_consistency_requires_two_candidates():
+    """A single input cannot establish a convergence study."""
+
+    assessment = assess_cp2k_input_consistency(
+        [make_convergence_input()],
+        "cutoff",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "At least two" in issue
+        for issue in assessment.issues
+    )
+
+def test_basis_study_rejects_unchanged_basis():
+    """A basis study must actually change a basis assignment."""
+
+    inputs = [
+        make_convergence_input(
+            basis="DZVP-MOLOPT-SR-GTH",
+        ),
+        make_convergence_input(
+            basis="DZVP-MOLOPT-SR-GTH",
+        ),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "basis",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "basis_set does not vary" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_basis_study_rejects_missing_potential():
+    """Missing pseudopotentials cannot establish comparability."""
+
+    inputs = [
+        make_convergence_input(
+            basis="DZVP-MOLOPT-SR-GTH",
+        ),
+        make_convergence_input(
+            basis="TZVP-MOLOPT-GTH",
+            potential=None,
+        ),
+    ]
+
+    assessment = assess_cp2k_input_consistency(
+        inputs,
+        "basis",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "potential is missing" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_basis_study_rejects_missing_kind():
+    """All candidates must contain the same KIND identities."""
+
+    reference = make_convergence_input(
+        basis="DZVP-MOLOPT-SR-GTH",
+    )
+
+    candidate = make_convergence_input(
+        basis="TZVP-MOLOPT-GTH",
+    ).model_copy(
+        update={"kinds": ()}
+    )
+
+    assessment = assess_cp2k_input_consistency(
+        [reference, candidate],
+        "basis",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "KIND identities differ" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_basis_study_rejects_element_change():
+    """A basis change must not alter a KIND's chemical element."""
+
+    reference = make_convergence_input(
+        basis="DZVP-MOLOPT-SR-GTH",
+    )
+
+    candidate = make_convergence_input(
+        basis="TZVP-MOLOPT-GTH",
+    ).model_copy(
+        update={
+            "kinds": (
+                ParsedCP2KKind(
+                    kind="O",
+                    element="N",
+                    basis_set="TZVP-MOLOPT-GTH",
+                    potential="GTH-PBE-q6",
+                ),
+            )
+        }
+    )
+
+    assessment = assess_cp2k_input_consistency(
+        [reference, candidate],
+        "basis",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "element differs" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_basis_study_rejects_duplicate_kind_names():
+    """Duplicate KIND identities must not be silently overwritten."""
+
+    reference = make_convergence_input()
+
+    duplicate = ParsedCP2KKind(
+        kind="O",
+        element="O",
+        basis_set="TZVP-MOLOPT-GTH",
+        potential="GTH-PBE-q6",
+    )
+
+    candidate = make_convergence_input(
+        basis="TZVP-MOLOPT-GTH",
+    ).model_copy(
+        update={
+            "kinds": (
+                duplicate,
+                duplicate,
+            )
+        }
+    )
+
+    assessment = assess_cp2k_input_consistency(
+        [reference, candidate],
+        "basis",
+    )
+
+    assert not assessment.consistent
+    assert any(
+        "duplicate KIND names" in issue
+        for issue in assessment.issues
+    )
+
+
+def test_input_consistency_rejects_unsupported_parameter():
+    """Unsupported study parameters must raise a clear error."""
+
+    inputs = [
+        make_convergence_input(cutoff=400.0),
+        make_convergence_input(cutoff=500.0),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported convergence parameter",
+    ):
+        assess_cp2k_input_consistency(
+            inputs,
+            "unsupported_parameter",
+        )
