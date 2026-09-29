@@ -446,3 +446,263 @@ def assess_cp2k_input_consistency(
         checked_fields=checked_fields,
         issues=tuple(issues),
     )
+
+@dataclass(frozen=True)
+class CP2KConvergenceStudyAssessment:
+    """
+    Integrated assessment of a CP2K convergence study.
+
+    A selected candidate is reported only when all required
+    scientific validation checks pass and its energy remains
+    within tolerance of every higher-cost candidate.
+
+    The assessment covers parsed CP2K settings only; it does
+    not establish equivalence of unparsed input settings.
+    """
+
+    valid: bool
+    converged: bool
+    selected_candidate_label: str | None
+    reference_candidate_label: str | None
+    input_consistency: CP2KInputConsistencyAssessment
+    calculation_validities: tuple[CP2KCalculationValidity, ...]
+    issues: tuple[str, ...]
+
+def assess_cp2k_convergence_study(
+    study: "ConvergenceStudyDefinition",
+    observations: list["ConvergenceObservation"],
+    inputs: list["ParsedCP2KInput"],
+    results: list["ParsedCP2KResult"],
+) -> CP2KConvergenceStudyAssessment:
+    """
+    Assess a CP2K FULL_SCF convergence study.
+
+    Inputs, results and observations must be supplied in the
+    same order as the study candidates.
+
+    A candidate is selected only when its energy is within
+    tolerance of every higher-cost candidate.
+    """
+    from nsdw.workflows.convergence.analyser import (
+        ConvergenceAnalysisError,
+        analyse_convergence_against_reference,
+    )
+
+    issues: list[str] = []
+    expected_count = len(study.candidates)
+
+    input_consistency = assess_cp2k_input_consistency(
+        inputs,
+        study.parameter.value,
+    )
+
+    if not input_consistency.consistent:
+        issues.extend(input_consistency.issues)
+
+    calculation_validities = tuple(
+        assess_cp2k_calculation_validity(
+            result,
+            CP2KConvergenceMode.FULL_SCF,
+        )
+        for result in results
+    )
+
+    for index, validity in enumerate(calculation_validities):
+        for issue in validity.issues:
+            issues.append(
+                f"Candidate {index + 1}: {issue}"
+            )
+
+    if len(inputs) != expected_count:
+        issues.append(
+            "The number of CP2K inputs must match "
+            "the number of study candidates."
+        )
+
+    if len(results) != expected_count:
+        issues.append(
+            "The number of CP2K results must match "
+            "the number of study candidates."
+        )
+
+    # Every candidate must have a distinct CP2K project name.
+    # Both its input and output must identify the calculation.
+    if (
+        len(inputs) == expected_count
+        and len(results) == expected_count
+    ):
+        input_project_names = []
+        output_project_names = []
+
+        for index, (input_settings, result) in enumerate(
+            zip(inputs, results),
+            start=1,
+        ):
+            input_name = input_settings.project_name
+            output_name = result.project_name
+
+            if not input_name or not input_name.strip():
+                issues.append(
+                    f"Candidate {index}: CP2K input project_name "
+                    "is missing."
+                )
+            else:
+                input_project_names.append(input_name)
+
+            if not output_name or not output_name.strip():
+                issues.append(
+                    f"Candidate {index}: CP2K output project_name "
+                    "is missing."
+                )
+            else:
+                output_project_names.append(output_name)
+
+        if len(input_project_names) != len(set(input_project_names)):
+            issues.append(
+                "CP2K input project names must be unique "
+                "across convergence candidates."
+            )
+
+        if len(output_project_names) != len(set(output_project_names)):
+            issues.append(
+                "CP2K output project names must be unique "
+                "across convergence candidates."
+            )
+
+    # Check that each CP2K input and output agree on
+    # the calculation identity and electronic state.
+    if (
+        len(inputs) == expected_count
+        and len(results) == expected_count
+    ):
+        for index, (input_settings, result) in enumerate(
+            zip(inputs, results),
+            start=1,
+        ):
+            for field_name in (
+                "project_name",
+                "run_type",
+                "charge",
+                "multiplicity",
+            ):
+                input_value = getattr(
+                    input_settings,
+                    field_name,
+                )
+                output_value = getattr(
+                    result,
+                    field_name,
+                )
+
+                if (
+                    input_value is not None
+                    and output_value is not None
+                    and input_value != output_value
+                ):
+                    issues.append(
+                        f"Candidate {index}: CP2K input/output "
+                        f"{field_name} mismatch."
+                    )
+
+    # Verify that the observation energies correspond to
+    # the parsed CP2K results, accounting for unit conversion.
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+
+    energy_abs_tolerance_ev = 1.0e-5
+
+    if (
+        len(results) == expected_count
+        and len(observations) == expected_count
+    ):
+        for index, (result, observation) in enumerate(
+            zip(results, observations),
+            start=1,
+        ):
+            energy_hartree = result.energy.total_energy_hartree
+
+            if energy_hartree is None or not math.isfinite(
+                energy_hartree
+            ):
+                continue  # Already handled by calculation validity.
+
+            parsed_energy_ev = energy_hartree * HARTREE_TO_EV
+
+            if not math.isclose(
+                parsed_energy_ev,
+                observation.total_energy_ev,
+                rel_tol=0.0,
+                abs_tol=energy_abs_tolerance_ev,
+            ):
+                issues.append(
+                    f"Candidate {index}: observation energy "
+                    "does not match the parsed CP2K total energy."
+                )
+
+    reference_label = (
+        study.candidates[-1].label
+        if study.candidates
+        else None
+    )
+
+    reference_analysis = None
+
+    try:
+        reference_analysis = (
+            analyse_convergence_against_reference(
+                study,
+                observations,
+            )
+        )
+    except ConvergenceAnalysisError as exc:
+        issues.append(str(exc))
+
+    if issues or reference_analysis is None:
+        return CP2KConvergenceStudyAssessment(
+            valid=False,
+            converged=False,
+            selected_candidate_label=None,
+            reference_candidate_label=reference_label,
+            input_consistency=input_consistency,
+            calculation_validities=calculation_validities,
+            issues=tuple(issues),
+        )
+
+    tolerance = (
+        study.criterion.energy_tolerance_ev_per_atom
+    )
+
+    selected_label = None
+
+    # The reference itself cannot establish convergence.
+    for index, candidate in enumerate(observations[:-1]):
+        candidate_energy = candidate.energy_ev_per_atom
+
+        higher_cost_energies = (
+            observation.energy_ev_per_atom
+            for observation in observations[index + 1:]
+        )
+
+        if all(
+            abs(candidate_energy - energy) <= tolerance
+            for energy in higher_cost_energies
+        ):
+            selected_label = candidate.candidate.label
+            break
+
+    if selected_label is None:
+        issues.append(
+            "No candidate satisfies the energy tolerance "
+            "against every higher-cost candidate."
+        )
+
+    return CP2KConvergenceStudyAssessment(
+        valid=True,
+        converged=selected_label is not None,
+        selected_candidate_label=selected_label,
+        reference_candidate_label=(
+            reference_analysis.reference_candidate_label
+        ),
+        input_consistency=input_consistency,
+        calculation_validities=calculation_validities,
+        issues=tuple(issues),
+    )

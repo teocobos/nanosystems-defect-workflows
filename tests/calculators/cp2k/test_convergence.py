@@ -696,3 +696,697 @@ def test_input_consistency_rejects_unsupported_parameter():
             inputs,
             "unsupported_parameter",
         )
+
+def test_integrated_cutoff_study_selects_stable_candidate():
+    """Select the least costly candidate stable against all later ones."""
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceCriterion,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+        ConvergenceCandidate(label="800Ry", order=2),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+        criterion=ConvergenceCriterion(
+            energy_tolerance_ev_per_atom=1.0e-3,
+        ),
+    )
+
+    # All calculations use exactly the same geometry.
+    structure_hash = "a" * 64
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash=structure_hash,
+        )
+        for candidate, energy in zip(
+            candidates,
+            (-100.0, -100.020, -100.025),
+        )
+    ]
+
+    project_names = (
+        "cutoff_400",
+        "cutoff_600",
+        "cutoff_800",
+    )
+
+    inputs = [
+        make_convergence_input(
+            cutoff=cutoff,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for cutoff, project_name in zip(
+            (400.0, 600.0, 800.0),
+            project_names,
+        )
+    ]
+
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+
+    results = [
+        make_cp2k_result(
+            energy=observation.total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for observation, project_name in zip(
+            observations,
+            project_names,
+        )
+    ]
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert assessment.valid
+    assert assessment.converged
+    assert assessment.selected_candidate_label == "600Ry"
+    assert assessment.reference_candidate_label == "800Ry"
+    assert assessment.input_consistency.consistent
+    assert all(
+        validity.valid
+        for validity in assessment.calculation_validities
+    )
+    assert assessment.issues == ()
+
+def test_integrated_study_rejects_unconverged_scf():
+    """Reject energy convergence if any CP2K SCF did not converge."""
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+        ConvergenceCandidate(label="800Ry", order=2),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+    )
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash="a" * 64,
+        )
+        for candidate, energy in zip(
+            candidates,
+            (-100.0, -100.020, -100.025),
+        )
+    ]
+
+    project_names = (
+        "cutoff_400",
+        "cutoff_600",
+        "cutoff_800",
+    )
+
+    inputs = [
+        make_convergence_input(
+            cutoff=cutoff,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for cutoff, project_name in zip(
+            (400.0, 600.0, 800.0),
+            project_names,
+        )
+    ]
+
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+
+    results = [
+        make_cp2k_result(
+            energy=observations[0].total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_names[0]}
+        ),
+        make_cp2k_result(
+            scf_status=CP2KSCFStatus.NOT_CONVERGED,
+            energy=observations[1].total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_names[1]}
+        ),
+        make_cp2k_result(
+            energy=observations[2].total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_names[2]}
+        ),
+    ]
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert not assessment.valid
+    assert not assessment.converged
+    assert assessment.selected_candidate_label is None
+
+    assert not assessment.calculation_validities[1].valid
+
+    assert any(
+        "FULL_SCF mode requires converged SCF" in issue
+        for issue in assessment.issues
+    )
+
+def test_integrated_study_rejects_structure_mismatch():
+    """Reject convergence studies using different structures."""
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+        ConvergenceCandidate(label="800Ry", order=2),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+    )
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash=structure_hash,
+        )
+        for candidate, energy, structure_hash in zip(
+            candidates,
+            (-100.0, -100.020, -100.025),
+            (
+                "a" * 64,
+                "b" * 64,  # Deliberately different geometry
+                "a" * 64,
+            ),
+        )
+    ]
+
+    project_names = (
+        "cutoff_400",
+        "cutoff_600",
+        "cutoff_800",
+    )
+
+    inputs = [
+        make_convergence_input(
+            cutoff=cutoff,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for cutoff, project_name in zip(
+            (400.0, 600.0, 800.0),
+            project_names,
+        )
+    ]
+
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+
+    results = [
+        make_cp2k_result(
+            energy=observation.total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for observation, project_name in zip(
+            observations,
+            project_names,
+        )
+    ]
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert not assessment.valid
+    assert not assessment.converged
+    assert assessment.selected_candidate_label is None
+
+    assert any(
+        "same computational structure" in issue
+        for issue in assessment.issues
+    )
+
+def test_integrated_study_rejects_xc_functional_change():
+    """Reject a cutoff study when the XC functional changes."""
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+        ConvergenceCandidate(label="800Ry", order=2),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+    )
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash="a" * 64,
+        )
+        for candidate, energy in zip(
+            candidates,
+            (-100.0, -100.020, -100.025),
+        )
+    ]
+
+    project_names = (
+        "cutoff_400",
+        "cutoff_600",
+        "cutoff_800",
+    )
+
+    inputs = [
+        make_convergence_input(
+            cutoff=400.0,
+            xc_functional="PBE",
+        ).model_copy(
+            update={"project_name": project_names[0]}
+        ),
+        make_convergence_input(
+            cutoff=600.0,
+            xc_functional="PBEsol",  # Deliberate mismatch
+        ).model_copy(
+            update={"project_name": project_names[1]}
+        ),
+        make_convergence_input(
+            cutoff=800.0,
+            xc_functional="PBE",
+        ).model_copy(
+            update={"project_name": project_names[2]}
+        ),
+    ]
+
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+
+    results = [
+        make_cp2k_result(
+            energy=observation.total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for observation, project_name in zip(
+            observations,
+            project_names,
+        )
+    ]
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert not assessment.valid
+    assert not assessment.converged
+    assert assessment.selected_candidate_label is None
+
+    assert not assessment.input_consistency.consistent
+
+    assert any(
+        "xc_functional differs" in issue
+        for issue in assessment.issues
+    )
+
+def test_integrated_study_rejects_energy_mismatch():
+    """Reject observations inconsistent with CP2K output energies."""
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+        ConvergenceCandidate(label="800Ry", order=2),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+    )
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash="a" * 64,
+        )
+        for candidate, energy in zip(
+            candidates,
+            (-100.0, -100.020, -100.025),
+        )
+    ]
+
+    project_names = (
+        "cutoff_400",
+        "cutoff_600",
+        "cutoff_800",
+    )
+
+    inputs = [
+        make_convergence_input(
+            cutoff=cutoff,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for cutoff, project_name in zip(
+            (400.0, 600.0, 800.0),
+            project_names,
+        )
+    ]
+
+    results = [
+        make_cp2k_result(
+            energy=observation.total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for observation, project_name in zip(
+            observations,
+            project_names,
+        )
+    ]
+
+    # Deliberately change the second CP2K result by 0.1 eV.
+    results[1] = make_cp2k_result(
+        energy=(
+            observations[1].total_energy_ev + 0.1
+        ) / HARTREE_TO_EV,
+    ).model_copy(
+        update={"project_name": project_names[1]}
+    )
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert not assessment.valid
+    assert not assessment.converged
+    assert assessment.selected_candidate_label is None
+
+    assert any(
+        "Candidate 2: observation energy does not match"
+        in issue
+        for issue in assessment.issues
+    )
+
+def test_integrated_study_rejects_project_name_mismatch():
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+    )
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash="a" * 64,
+        )
+        for candidate, energy in zip(
+            candidates,
+            (-100.0, -100.001),
+        )
+    ]
+
+    inputs = [
+        make_convergence_input(
+            cutoff=400.0,
+        ).model_copy(
+            update={"project_name": "cutoff_400"}
+        ),
+        make_convergence_input(
+            cutoff=600.0,
+        ).model_copy(
+            update={"project_name": "cutoff_600"}
+        ),
+    ]
+
+    results = [
+        make_cp2k_result(
+            energy=observation.total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for observation, project_name in zip(
+            observations,
+            ("cutoff_400", "wrong_project"),
+        )
+    ]
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert not assessment.valid
+    assert not assessment.converged
+    assert assessment.selected_candidate_label is None
+    assert any(
+        "project_name mismatch" in issue
+        for issue in assessment.issues
+    )
+
+def test_integrated_study_rejects_missing_project_name():
+    """Reject a study when an input or output project name is missing."""
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+    )
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash="a" * 64,
+        )
+        for candidate, energy in zip(
+            candidates,
+            (-100.0, -100.001),
+        )
+    ]
+
+    inputs = [
+        make_convergence_input(
+            cutoff=400.0,
+        ).model_copy(
+            update={"project_name": "cutoff_400"}
+        ),
+        make_convergence_input(
+            cutoff=600.0,
+        ).model_copy(
+            update={"project_name": None}
+        ),
+    ]
+
+    results = [
+        make_cp2k_result(
+            energy=observation.total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": project_name}
+        )
+        for observation, project_name in zip(
+            observations,
+            ("cutoff_400", "cutoff_600"),
+        )
+    ]
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert not assessment.valid
+    assert not assessment.converged
+    assert assessment.selected_candidate_label is None
+
+    assert any(
+        "Candidate 2: CP2K input project_name is missing"
+        in issue
+        for issue in assessment.issues
+    )
+
+def test_integrated_study_rejects_duplicate_project_names():
+    """Reject convergence candidates sharing a CP2K project name."""
+    from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+    from nsdw.calculators.cp2k.convergence import (
+        assess_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceObservation,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    candidates = [
+        ConvergenceCandidate(label="400Ry", order=0),
+        ConvergenceCandidate(label="600Ry", order=1),
+    ]
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=candidates,
+    )
+
+    observations = [
+        ConvergenceObservation(
+            candidate=candidate,
+            total_energy_ev=energy,
+            n_atoms=10,
+            structure_hash="a" * 64,
+        )
+        for candidate, energy in zip(
+            candidates,
+            (-100.0, -100.001),
+        )
+    ]
+
+    # Deliberately reuse the same project name for both candidates.
+    inputs = [
+        make_convergence_input(
+            cutoff=cutoff,
+        ).model_copy(
+            update={"project_name": "duplicate_project"}
+        )
+        for cutoff in (400.0, 600.0)
+    ]
+
+    results = [
+        make_cp2k_result(
+            energy=observation.total_energy_ev / HARTREE_TO_EV,
+        ).model_copy(
+            update={"project_name": "duplicate_project"}
+        )
+        for observation in observations
+    ]
+
+    assessment = assess_cp2k_convergence_study(
+        study,
+        observations,
+        inputs,
+        results,
+    )
+
+    assert not assessment.valid
+    assert not assessment.converged
+    assert assessment.selected_candidate_label is None
+
+    assert any(
+        "CP2K input project names must be unique"
+        in issue
+        for issue in assessment.issues
+    )
+
+    assert any(
+        "CP2K output project names must be unique"
+        in issue
+        for issue in assessment.issues
+    )
