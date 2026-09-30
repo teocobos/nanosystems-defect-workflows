@@ -243,3 +243,99 @@ def analyse_convergence_against_reference(
             selected_candidate_label is not None
         ),
     )
+
+@dataclass(frozen=True)
+class ConvergenceTailComparison:
+    """
+    Stability of one candidate against all higher-cost candidates.
+
+    ``maximum_energy_difference_ev_per_atom`` is the largest absolute
+    energy difference between the candidate and any candidate later in
+    the computational-cost ordering.
+    """
+
+    candidate_label: str
+    maximum_energy_difference_ev_per_atom: float
+    within_energy_tolerance: bool
+
+
+@dataclass(frozen=True)
+class ConvergenceTailAnalysis:
+    """
+    Generic convergence analysis across the complete higher-cost tail.
+
+    A candidate is selected only when its energy is within the configured
+    tolerance of every higher-cost candidate. The final candidate is
+    excluded because it has no higher-cost calculation against which its
+    stability can be tested.
+    """
+
+    selected_candidate_label: str | None
+    comparisons: tuple[ConvergenceTailComparison, ...]
+    energy_tolerance_satisfied: bool
+
+
+def analyse_convergence_tail_stability(
+    study: ConvergenceStudyDefinition,
+    observations: list[ConvergenceObservation],
+) -> ConvergenceTailAnalysis:
+    """
+    Assess each candidate against every higher-cost candidate.
+
+    The generic energy analyser is reused to validate candidate ordering,
+    structure identity, atom counts and observation completeness before
+    tail stability is evaluated.
+    """
+
+    analyse_convergence_energy(
+        study,
+        observations,
+    )
+
+    tolerance = (
+        study.criterion.energy_tolerance_ev_per_atom
+    )
+
+    comparisons: list[ConvergenceTailComparison] = []
+
+    for index, candidate in enumerate(observations[:-1]):
+        candidate_energy = candidate.energy_ev_per_atom
+
+        differences = [
+            abs(
+                candidate_energy
+                - higher_cost.energy_ev_per_atom
+            )
+            for higher_cost in observations[index + 1:]
+        ]
+
+        maximum_difference = max(differences)
+
+        comparisons.append(
+            ConvergenceTailComparison(
+                candidate_label=candidate.candidate.label,
+                maximum_energy_difference_ev_per_atom=(
+                    maximum_difference
+                ),
+                within_energy_tolerance=(
+                    maximum_difference <= tolerance
+                ),
+            )
+        )
+
+    selected_candidate_label = None
+
+    for comparison in comparisons:
+        if comparison.within_energy_tolerance:
+            selected_candidate_label = (
+                comparison.candidate_label
+            )
+            break
+
+    return ConvergenceTailAnalysis(
+        selected_candidate_label=selected_candidate_label,
+        comparisons=tuple(comparisons),
+        energy_tolerance_satisfied=(
+            selected_candidate_label is not None
+        ),
+    )

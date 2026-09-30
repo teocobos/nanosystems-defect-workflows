@@ -12,7 +12,7 @@ from nsdw.workflows.convergence.models import (
     ConvergenceParameter,
     ConvergenceStudyDefinition,
 )
-
+from nsdw.models.quantity import Quantity
 
 def _candidates() -> list[ConvergenceCandidate]:
     """Return a simple ordered candidate set."""
@@ -253,3 +253,221 @@ def test_study_accepts_custom_tolerance():
         study.criterion.energy_tolerance_ev_per_atom
         == pytest.approx(5.0e-4)
     )
+
+def test_candidate_accepts_quantity_value():
+    candidate = ConvergenceCandidate(
+        label="600Ry",
+        order=1,
+        value=Quantity(
+            value=600.0,
+            unit="Ry",
+        ),
+    )
+
+    assert isinstance(candidate.value, Quantity)
+    assert candidate.value.value == pytest.approx(600.0)
+    assert candidate.value.unit == "Ry"
+
+
+def test_candidate_accepts_basis_value():
+    candidate = ConvergenceCandidate(
+        label="tzvp",
+        order=1,
+        value="TZVP-MOLOPT-SR-GTH",
+    )
+
+    assert candidate.value == "TZVP-MOLOPT-SR-GTH"
+
+
+def test_candidate_accepts_kpoint_mesh_value():
+    candidate = ConvergenceCandidate(
+        label="2x2x1",
+        order=1,
+        value=(2, 2, 1),
+    )
+
+    assert candidate.value == (2, 2, 1)
+
+
+def test_candidate_value_remains_optional():
+    candidate = ConvergenceCandidate(
+        label="legacy",
+        order=0,
+    )
+
+    assert candidate.value is None
+
+
+def test_cutoff_study_accepts_quantity_values_in_ry():
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=[
+            ConvergenceCandidate(
+                label="400Ry",
+                order=0,
+                value=Quantity(
+                    value=400.0,
+                    unit="Ry",
+                ),
+            ),
+            ConvergenceCandidate(
+                label="600Ry",
+                order=1,
+                value=Quantity(
+                    value=600.0,
+                    unit="Ry",
+                ),
+            ),
+        ],
+    )
+
+    assert study.candidates[0].value == Quantity(
+        value=400.0,
+        unit="Ry",
+    )
+
+
+def test_cutoff_study_rejects_string_candidate_value():
+    with pytest.raises(
+        ValidationError,
+        match="CUTOFF candidates must use Quantity values",
+    ):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.CUTOFF,
+            candidates=[
+                ConvergenceCandidate(
+                    label="400Ry",
+                    order=0,
+                    value="400Ry",
+                ),
+                ConvergenceCandidate(
+                    label="600Ry",
+                    order=1,
+                    value="600Ry",
+                ),
+            ],
+        )
+
+
+def test_cutoff_study_rejects_non_ry_quantity():
+    with pytest.raises(
+        ValidationError,
+        match="CUTOFF candidate quantities must use Ry",
+    ):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.CUTOFF,
+            candidates=[
+                ConvergenceCandidate(
+                    label="400eV",
+                    order=0,
+                    value=Quantity(
+                        value=400.0,
+                        unit="eV",
+                    ),
+                ),
+                ConvergenceCandidate(
+                    label="600eV",
+                    order=1,
+                    value=Quantity(
+                        value=600.0,
+                        unit="eV",
+                    ),
+                ),
+            ],
+        )
+
+
+def test_relative_cutoff_study_accepts_quantity_values_in_ry():
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.RELATIVE_CUTOFF,
+        candidates=[
+            ConvergenceCandidate(
+                label="40Ry",
+                order=0,
+                value=Quantity(
+                    value=40.0,
+                    unit="Ry",
+                ),
+            ),
+            ConvergenceCandidate(
+                label="60Ry",
+                order=1,
+                value=Quantity(
+                    value=60.0,
+                    unit="Ry",
+                ),
+            ),
+        ],
+    )
+
+    assert isinstance(study.candidates[0].value, Quantity)
+
+
+def test_basis_study_rejects_quantity_candidate_value():
+    with pytest.raises(
+        ValidationError,
+        match="BASIS candidates must use string values",
+    ):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.BASIS,
+            candidates=[
+                ConvergenceCandidate(
+                    label="dzvp",
+                    order=0,
+                    value=Quantity(
+                        value=1.0,
+                        unit="Ry",
+                    ),
+                ),
+                ConvergenceCandidate(
+                    label="tzvp",
+                    order=1,
+                    value=Quantity(
+                        value=2.0,
+                        unit="Ry",
+                    ),
+                ),
+            ],
+        )
+
+
+def test_kpoints_study_accepts_mesh_values():
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.KPOINTS,
+        candidates=[
+            ConvergenceCandidate(
+                label="1x1x1",
+                order=0,
+                value=(1, 1, 1),
+            ),
+            ConvergenceCandidate(
+                label="2x2x1",
+                order=1,
+                value=(2, 2, 1),
+            ),
+        ],
+    )
+
+    assert study.candidates[-1].value == (2, 2, 1)
+
+
+def test_kpoints_study_rejects_string_candidate_value():
+    with pytest.raises(
+        ValidationError,
+        match="KPOINTS candidates must use three-integer meshes",
+    ):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.KPOINTS,
+            candidates=[
+                ConvergenceCandidate(
+                    label="1x1x1",
+                    order=0,
+                    value="1x1x1",
+                ),
+                ConvergenceCandidate(
+                    label="2x2x1",
+                    order=1,
+                    value="2x2x1",
+                ),
+            ],
+        )

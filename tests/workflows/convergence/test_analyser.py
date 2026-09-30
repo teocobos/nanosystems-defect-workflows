@@ -8,6 +8,7 @@ from nsdw.workflows.convergence.analyser import (
     ConvergenceAnalysisError,
     analyse_convergence_energy,
     analyse_convergence_against_reference,
+    analyse_convergence_tail_stability,
 )
 from nsdw.workflows.convergence.models import (
     ConvergenceCandidate,
@@ -468,3 +469,150 @@ def test_reference_analysis_reports_energy_differences():
     assert differences == pytest.approx(
         [0.0083, 0.0079, 0.0003, 0.0001]
     )
+
+def test_tail_stability_requires_agreement_with_all_higher_cost_candidates():
+    """Reference agreement alone must not imply tail stability."""
+
+    study = _cutoff_study()
+
+    observations = _cutoff_observations(
+        (
+            -10.0200,
+            -10.0100,
+            -10.0000,
+            -10.0050,
+            -10.0002,
+        )
+    )
+
+    reference = analyse_convergence_against_reference(
+        study,
+        observations,
+    )
+
+    tail = analyse_convergence_tail_stability(
+        study,
+        observations,
+    )
+
+    assert reference.selected_candidate_label == "500_ry"
+    assert tail.selected_candidate_label is None
+    assert not tail.energy_tolerance_satisfied
+
+
+def test_tail_stability_selects_least_expensive_stable_candidate():
+    """Select the first candidate stable against the complete tail."""
+
+    study = _cutoff_study()
+
+    observations = _cutoff_observations(
+        (
+            -10.0200,
+            -10.0100,
+            -10.0000,
+            -10.0004,
+            -10.0002,
+        )
+    )
+
+    analysis = analyse_convergence_tail_stability(
+        study,
+        observations,
+    )
+
+    assert analysis.selected_candidate_label == "500_ry"
+    assert analysis.energy_tolerance_satisfied
+
+
+def test_tail_stability_reports_maximum_higher_cost_difference():
+    """Each candidate records its worst difference across the tail."""
+
+    study = _cutoff_study()
+
+    observations = _cutoff_observations(
+        (
+            -10.0200,
+            -10.0100,
+            -10.0000,
+            -10.0004,
+            -10.0002,
+        )
+    )
+
+    analysis = analyse_convergence_tail_stability(
+        study,
+        observations,
+    )
+
+    differences = [
+        comparison.maximum_energy_difference_ev_per_atom
+        for comparison in analysis.comparisons
+    ]
+
+    assert differences == pytest.approx(
+        [0.0200, 0.0100, 0.0004, 0.0002]
+    )
+
+    assert [
+        comparison.within_energy_tolerance
+        for comparison in analysis.comparisons
+    ] == [False, False, True, True]
+
+
+def test_tail_stability_excludes_final_candidate_from_selection():
+    """The final candidate cannot establish stability by itself."""
+
+    study = _cutoff_study()
+
+    observations = _cutoff_observations(
+        (
+            -10.000,
+            -10.010,
+            -10.020,
+            -10.030,
+            -10.040,
+        )
+    )
+
+    analysis = analyse_convergence_tail_stability(
+        study,
+        observations,
+    )
+
+    assert len(analysis.comparisons) == 4
+    assert all(
+        comparison.candidate_label != "600_ry"
+        for comparison in analysis.comparisons
+    )
+
+
+def test_tail_stability_reuses_generic_study_validation():
+    """Tail analysis must reject mismatched computational structures."""
+
+    study = _cutoff_study()
+
+    observations = _cutoff_observations(
+        (
+            -10.0000,
+            -10.0050,
+            -10.0080,
+            -10.0082,
+            -10.0083,
+        )
+    )
+
+    observations[2] = _observation(
+        "500_ry",
+        2,
+        -10.0080,
+        structure_hash="b" * 64,
+    )
+
+    with pytest.raises(
+        ConvergenceAnalysisError,
+        match="same computational structure",
+    ):
+        analyse_convergence_tail_stability(
+            study,
+            observations,
+        )

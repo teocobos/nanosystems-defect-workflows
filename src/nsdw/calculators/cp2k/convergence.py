@@ -485,7 +485,7 @@ def assess_cp2k_convergence_study(
     """
     from nsdw.workflows.convergence.analyser import (
         ConvergenceAnalysisError,
-        analyse_convergence_against_reference,
+        analyse_convergence_tail_stability,
     )
 
     issues: list[str] = []
@@ -644,19 +644,17 @@ def assess_cp2k_convergence_study(
         else None
     )
 
-    reference_analysis = None
+    tail_analysis = None
 
     try:
-        reference_analysis = (
-            analyse_convergence_against_reference(
-                study,
-                observations,
-            )
+        tail_analysis = analyse_convergence_tail_stability(
+            study,
+            observations,
         )
     except ConvergenceAnalysisError as exc:
         issues.append(str(exc))
 
-    if issues or reference_analysis is None:
+    if issues or tail_analysis is None:
         return CP2KConvergenceStudyAssessment(
             valid=False,
             converged=False,
@@ -667,27 +665,7 @@ def assess_cp2k_convergence_study(
             issues=tuple(issues),
         )
 
-    tolerance = (
-        study.criterion.energy_tolerance_ev_per_atom
-    )
-
-    selected_label = None
-
-    # The reference itself cannot establish convergence.
-    for index, candidate in enumerate(observations[:-1]):
-        candidate_energy = candidate.energy_ev_per_atom
-
-        higher_cost_energies = (
-            observation.energy_ev_per_atom
-            for observation in observations[index + 1:]
-        )
-
-        if all(
-            abs(candidate_energy - energy) <= tolerance
-            for energy in higher_cost_energies
-        ):
-            selected_label = candidate.candidate.label
-            break
+    selected_label = tail_analysis.selected_candidate_label
 
     if selected_label is None:
         issues.append(
@@ -699,9 +677,7 @@ def assess_cp2k_convergence_study(
         valid=True,
         converged=selected_label is not None,
         selected_candidate_label=selected_label,
-        reference_candidate_label=(
-            reference_analysis.reference_candidate_label
-        ),
+        reference_candidate_label=reference_label,
         input_consistency=input_consistency,
         calculation_validities=calculation_validities,
         issues=tuple(issues),

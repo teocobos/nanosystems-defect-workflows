@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
-
+from nsdw.models.quantity import Quantity
 
 class ConvergenceParameter(StrEnum):
     """Numerical parameter varied during a convergence study."""
@@ -38,11 +38,14 @@ class ConvergenceCandidate(BaseModel):
 
     ``label`` is the stable human-readable identifier used in reports
     and directory names. ``order`` represents increasing computational
-    expense within the study.
+    expense within the study. ``value`` stores the scientific parameter
+    value when available. It remains optional for compatibility with
+    legacy studies that identify candidates only by label.
     """
 
     label: str = Field(min_length=1)
     order: Annotated[int, Field(ge=0)]
+    value: Quantity | str | tuple[int, int, int] | None = None
 
 
 class ConvergenceObservation(BaseModel):
@@ -113,5 +116,59 @@ class ConvergenceStudyDefinition(BaseModel):
             raise ValueError(
                 "Convergence candidate orders must be unique."
             )
+        supplied_values = [
+            candidate.value
+            for candidate in self.candidates
+            if candidate.value is not None
+        ]
 
+        if supplied_values:
+            if self.parameter == ConvergenceParameter.BASIS:
+                if not all(
+                    isinstance(value, str)
+                    for value in supplied_values
+                ):
+                    raise ValueError(
+                        "BASIS candidates must use string values."
+                    )
+
+            elif self.parameter in {
+                ConvergenceParameter.CUTOFF,
+                ConvergenceParameter.RELATIVE_CUTOFF,
+            }:
+                parameter_name = self.parameter.name
+
+                if not all(
+                    isinstance(value, Quantity)
+                    for value in supplied_values
+                ):
+                    raise ValueError(
+                        f"{parameter_name} candidates must use "
+                        "Quantity values."
+                    )
+
+                if not all(
+                    value.unit == "Ry"
+                    for value in supplied_values
+                    if isinstance(value, Quantity)
+                ):
+                    raise ValueError(
+                        f"{parameter_name} candidate quantities "
+                        "must use Ry."
+                    )
+
+            elif self.parameter == ConvergenceParameter.KPOINTS:
+                if not all(
+                    isinstance(value, tuple)
+                    and len(value) == 3
+                    and all(
+                        isinstance(component, int)
+                        for component in value
+                    )
+                    for value in supplied_values
+                ):
+                    raise ValueError(
+                        "KPOINTS candidates must use "
+                        "three-integer meshes."
+                    )
         return self
