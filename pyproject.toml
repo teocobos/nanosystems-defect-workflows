@@ -29,6 +29,10 @@ dev = [
     "pytest-cov>=5.0"
 ]
 
+reporting = [
+    "matplotlib>=3.8"
+]
+
 [project.scripts]
 nsdw = "nsdw.cli:app"
 
