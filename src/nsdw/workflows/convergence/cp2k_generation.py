@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from pymatgen.core import Structure
@@ -13,11 +14,17 @@ from nsdw.calculators.cp2k.package import (
     write_cp2k_package,
 )
 from nsdw.models.quantity import Quantity
+from nsdw.workflows.convergence.manifest import (
+    ConvergenceManifestCandidate,
+    ConvergenceStudyManifest,
+    write_convergence_manifest,
+)
 from nsdw.workflows.convergence.models import (
     ConvergenceParameter,
     ConvergenceStudyDefinition,
 )
-import shutil
+
+
 
 class CP2KConvergenceGenerationError(RuntimeError):
     """Raised when a CP2K convergence study cannot be generated."""
@@ -101,6 +108,7 @@ def generate_cp2k_convergence_study(
     packages: list[Path] = []
 
     try:
+        # Generate one CP2K package for each convergence candidate.
         for candidate in study.candidates:
             project_name = (
                 f"{base_config.project_name}-{candidate.label}"
@@ -125,8 +133,79 @@ def generate_cp2k_convergence_study(
 
             packages.append(package)
 
+        # Build the persistent manifest describing the generated study.
+        manifest_candidates: list[
+            ConvergenceManifestCandidate
+        ] = []
+
+        for candidate, package in zip(
+            study.candidates,
+            packages,
+            strict=True,
+        ):
+            if candidate.value is None:
+                raise CP2KConvergenceGenerationError(
+                    "Generated convergence candidates must "
+                    "define a value."
+                )
+
+            input_files = tuple(
+                package.glob("*.inp")
+            )
+
+            coordinate_files = tuple(
+                package.glob("*.xyz")
+            )
+
+            if len(input_files) != 1:
+                raise CP2KConvergenceGenerationError(
+                    "Expected exactly one CP2K input file "
+                    f"in {package}."
+                )
+
+            if len(coordinate_files) != 1:
+                raise CP2KConvergenceGenerationError(
+                    "Expected exactly one coordinate file "
+                    f"in {package}."
+                )
+
+            manifest_candidates.append(
+                ConvergenceManifestCandidate(
+                    label=candidate.label,
+                    order=candidate.order,
+                    value=candidate.value,
+                    directory=package.relative_to(
+                        output_directory
+                    ).as_posix(),
+                    input_file=input_files[0].name,
+                    coordinate_file=(
+                        coordinate_files[0].name
+                    ),
+                )
+            )
+
+        manifest = ConvergenceStudyManifest(
+            calculator="cp2k",
+            parameter=study.parameter,
+            criterion=study.criterion,
+            candidates=tuple(
+                manifest_candidates
+            ),
+        )
+
+        write_convergence_manifest(
+            manifest=manifest,
+            path=output_directory / "manifest.json",
+        )
+
     except Exception:
-        if not output_existed_before and output_directory.exists():
+        # Only remove the campaign directory if this invocation
+        # created it. Never delete a directory that existed before
+        # generation began.
+        if (
+            not output_existed_before
+            and output_directory.exists()
+        ):
             shutil.rmtree(output_directory)
 
         raise

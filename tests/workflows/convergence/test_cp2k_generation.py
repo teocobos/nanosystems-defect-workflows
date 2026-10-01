@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from pymatgen.core import Lattice, Structure
 
@@ -358,3 +359,150 @@ def test_generation_failure_preserves_preexisting_output_directory(
     assert output_directory.is_dir()
     assert sentinel.is_file()
     assert sentinel.read_text(encoding="utf-8") == "do not delete\n"
+
+def test_generate_cutoff_study_writes_manifest(
+    tmp_path: Path,
+) -> None:
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=[
+            ConvergenceCandidate(
+                label="400-Ry",
+                order=0,
+                value=Quantity(value=400.0, unit="Ry"),
+            ),
+            ConvergenceCandidate(
+                label="600-Ry",
+                order=1,
+                value=Quantity(value=600.0, unit="Ry"),
+            ),
+        ],
+    )
+
+    output_directory = tmp_path / "cutoff-study"
+
+    generate_cp2k_convergence_study(
+        structure=_structure(),
+        base_config=_base_config(),
+        study=study,
+        output_directory=output_directory,
+    )
+
+    manifest_path = output_directory / "manifest.json"
+
+    assert manifest_path.is_file()
+
+def test_generated_manifest_records_study_metadata_and_paths(
+    tmp_path: Path,
+) -> None:
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=[
+            ConvergenceCandidate(
+                label="400-Ry",
+                order=0,
+                value=Quantity(value=400.0, unit="Ry"),
+            ),
+            ConvergenceCandidate(
+                label="600-Ry",
+                order=1,
+                value=Quantity(value=600.0, unit="Ry"),
+            ),
+        ],
+    )
+
+    output_directory = tmp_path / "cutoff-study"
+
+    generate_cp2k_convergence_study(
+        structure=_structure(),
+        base_config=_base_config(),
+        study=study,
+        output_directory=output_directory,
+    )
+
+    manifest = json.loads(
+        (output_directory / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert manifest["schema_version"] == 1
+    assert manifest["calculator"] == "cp2k"
+    assert manifest["parameter"] == "cutoff"
+
+    assert manifest["criterion"] == {
+        "energy_tolerance_ev_per_atom": 1.0e-3,
+    }
+
+    assert len(manifest["candidates"]) == 2
+
+    first = manifest["candidates"][0]
+    second = manifest["candidates"][1]
+
+    assert first == {
+        "label": "400-Ry",
+        "order": 0,
+        "value": {
+            "value": 400.0,
+            "unit": "Ry",
+        },
+        "directory": "400-Ry",
+        "input_file": "test-400-Ry.inp",
+        "coordinate_file": "test-400-Ry.xyz",
+    }
+
+    assert second == {
+        "label": "600-Ry",
+        "order": 1,
+        "value": {
+            "value": 600.0,
+            "unit": "Ry",
+        },
+        "directory": "600-Ry",
+        "input_file": "test-600-Ry.inp",
+        "coordinate_file": "test-600-Ry.xyz",
+    }
+
+    # Manifest paths must remain portable.
+    assert not Path(first["directory"]).is_absolute()
+    assert not Path(first["input_file"]).is_absolute()
+    assert not Path(first["coordinate_file"]).is_absolute()
+
+def test_manifest_failure_rolls_back_generated_study(
+    tmp_path: Path,
+) -> None:
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.CUTOFF,
+        candidates=[
+            ConvergenceCandidate(
+                label="400-Ry",
+                order=0,
+                value=Quantity(value=400.0, unit="Ry"),
+            ),
+            ConvergenceCandidate(
+                label="600-Ry",
+                order=1,
+                value=Quantity(value=600.0, unit="Ry"),
+            ),
+        ],
+    )
+
+    output_directory = tmp_path / "cutoff-study"
+
+    with patch(
+        "nsdw.workflows.convergence.cp2k_generation."
+        "write_convergence_manifest",
+        side_effect=RuntimeError("simulated manifest failure"),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="simulated manifest failure",
+        ):
+            generate_cp2k_convergence_study(
+                structure=_structure(),
+                base_config=_base_config(),
+                study=study,
+                output_directory=output_directory,
+            )
+
+    assert not output_directory.exists()
