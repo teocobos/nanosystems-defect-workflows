@@ -7,9 +7,12 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from nsdw.models.quantity import Quantity
+
 from nsdw.workflows.convergence.models import (
+    ConvergenceCandidate,
     ConvergenceCriterion,
     ConvergenceParameter,
+    ConvergenceStudyDefinition,
 )
 
 
@@ -59,3 +62,33 @@ def write_convergence_manifest(
     )
 
     return path
+
+def load_convergence_manifest(
+    path: str | Path,
+) -> ConvergenceStudyManifest:
+    """Load and validate a convergence-study manifest from JSON."""
+
+    path = Path(path)
+
+    return ConvergenceStudyManifest.model_validate_json(
+        path.read_text(encoding="utf-8")
+    )
+
+
+def convergence_study_from_manifest(
+    manifest: ConvergenceStudyManifest,
+) -> ConvergenceStudyDefinition:
+    """Reconstruct a convergence study definition from its manifest."""
+
+    return ConvergenceStudyDefinition(
+        parameter=manifest.parameter,
+        criterion=manifest.criterion,
+        candidates=[
+            ConvergenceCandidate(
+                label=candidate.label,
+                order=candidate.order,
+                value=candidate.value,
+            )
+            for candidate in manifest.candidates
+        ],
+    )
