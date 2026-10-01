@@ -7,15 +7,11 @@ from pathlib import Path
 
 import yaml
 
+from pydantic import ValidationError
+
+from nsdw.project.models import ProjectConfig
 
 PROJECT_SCHEMA_VERSION = 1
-
-PROJECT_DIRECTORIES = (
-    "structure",
-    "convergence",
-    "production",
-    "reports",
-)
 
 
 class ProjectWorkspaceError(RuntimeError):
@@ -50,52 +46,6 @@ class ProjectWorkspace:
         return self.metadata.schema_version
 
 
-def create_project_workspace(
-    root: str | Path,
-    *,
-    name: str,
-) -> ProjectWorkspace:
-    """Create a new NSDW project workspace."""
-
-    root = Path(root).expanduser().resolve()
-
-    metadata_path = root / "nsdw-project.yaml"
-
-    if metadata_path.exists():
-        raise ProjectWorkspaceError(
-            f"NSDW project already exists: {root}"
-        )
-
-    root.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    for directory in PROJECT_DIRECTORIES:
-        (root / directory).mkdir(exist_ok=True)
-
-    metadata = ProjectMetadata(
-        schema_version=PROJECT_SCHEMA_VERSION,
-        name=name,
-    )
-
-    metadata_path.write_text(
-        yaml.safe_dump(
-            {
-                "schema_version": metadata.schema_version,
-                "name": metadata.name,
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-
-    return ProjectWorkspace(
-        root=root,
-        metadata=metadata,
-    )
-
-
 def load_project_workspace(
     root: str | Path,
 ) -> ProjectWorkspace:
@@ -103,7 +53,7 @@ def load_project_workspace(
 
     root = Path(root).expanduser().resolve()
 
-    metadata_path = root / "nsdw-project.yaml"
+    metadata_path = root / "project.yaml"
 
     if not metadata_path.is_file():
         raise ProjectWorkspaceError(
@@ -117,22 +67,31 @@ def load_project_workspace(
             )
         )
 
-        metadata = ProjectMetadata(
-            schema_version=raw_metadata["schema_version"],
-            name=raw_metadata["name"],
+        config = ProjectConfig.model_validate(
+            raw_metadata
         )
 
-    except (OSError, TypeError, KeyError, yaml.YAMLError) as exc:
+    except (
+        OSError,
+        TypeError,
+        yaml.YAMLError,
+        ValidationError,
+    ) as exc:
         raise ProjectWorkspaceError(
             f"Could not load NSDW project metadata: {metadata_path}"
         ) from exc
 
-    if metadata.schema_version != PROJECT_SCHEMA_VERSION:
+    if config.schema_version != PROJECT_SCHEMA_VERSION:
         raise ProjectWorkspaceError(
             "Unsupported NSDW project schema version: "
-            f"{metadata.schema_version}. "
+            f"{config.schema_version}. "
             f"Supported version: {PROJECT_SCHEMA_VERSION}."
         )
+
+    metadata = ProjectMetadata(
+        schema_version=config.schema_version,
+        name=config.name,
+    )
 
     return ProjectWorkspace(
         root=root,
@@ -157,7 +116,7 @@ def find_project_workspace(
         current,
         *current.parents,
     ):
-        metadata_path = candidate / "nsdw-project.yaml"
+        metadata_path = candidate / "project.yaml"
 
         if metadata_path.is_file():
             return load_project_workspace(candidate)

@@ -1,99 +1,41 @@
+"""Tests for NSDW project workspace loading and discovery."""
+
 from pathlib import Path
 
 import pytest
 import yaml
 
+from nsdw.project.models import ProjectConfig
+from nsdw.project.scaffold import create_project
 from nsdw.project.workspace import (
     ProjectWorkspaceError,
-    create_project_workspace,
     find_project_workspace,
     load_project_workspace,
 )
 
 
-def test_create_project_workspace(tmp_path: Path) -> None:
-    project_directory = tmp_path / "IGZO"
+def make_config(
+    *,
+    name: str = "IGZO",
+) -> ProjectConfig:
+    """Return a representative NSDW project configuration."""
 
-    workspace = create_project_workspace(
-        project_directory,
-        name="IGZO",
+    return ProjectConfig(
+        name=name,
+        material="InGaZnO4",
+        nsdw_version="0.1.0",
+        components=["cp2k"],
     )
 
-    assert workspace.root == project_directory.resolve()
 
-    assert (project_directory / "nsdw-project.yaml").is_file()
-    assert (project_directory / "structure").is_dir()
-    assert (project_directory / "convergence").is_dir()
-    assert (project_directory / "production").is_dir()
-    assert (project_directory / "reports").is_dir()
-
-    metadata = yaml.safe_load(
-        (project_directory / "nsdw-project.yaml").read_text(
-            encoding="utf-8"
-        )
-    )
-
-    assert metadata == {
-        "schema_version": 1,
-        "name": "IGZO",
-    }
-
-
-def test_create_project_workspace_refuses_existing_project(
+def test_load_project_workspace(
     tmp_path: Path,
 ) -> None:
     project_directory = tmp_path / "IGZO"
 
-    create_project_workspace(
-        project_directory,
-        name="IGZO",
-    )
-
-    with pytest.raises(
-        ProjectWorkspaceError,
-        match="already exists",
-    ):
-        create_project_workspace(
-            project_directory,
-            name="IGZO",
-        )
-
-
-def test_create_project_workspace_initialises_existing_directory(
-    tmp_path: Path,
-) -> None:
-    project_directory = tmp_path / "IGZO"
-    project_directory.mkdir()
-
-    existing_file = project_directory / "notes.txt"
-    existing_file.write_text(
-        "Existing research notes\n",
-        encoding="utf-8",
-    )
-
-    workspace = create_project_workspace(
-        project_directory,
-        name="IGZO",
-    )
-
-    assert workspace.root == project_directory.resolve()
-    assert existing_file.read_text(
-        encoding="utf-8"
-    ) == "Existing research notes\n"
-
-    assert (project_directory / "nsdw-project.yaml").is_file()
-    assert (project_directory / "structure").is_dir()
-    assert (project_directory / "convergence").is_dir()
-    assert (project_directory / "production").is_dir()
-    assert (project_directory / "reports").is_dir()
-
-
-def test_load_project_workspace(tmp_path: Path) -> None:
-    project_directory = tmp_path / "IGZO"
-
-    create_project_workspace(
-        project_directory,
-        name="IGZO",
+    create_project(
+        root=project_directory,
+        config=make_config(),
     )
 
     workspace = load_project_workspace(
@@ -110,18 +52,19 @@ def test_load_project_workspace_rejects_unsupported_schema_version(
 ) -> None:
     project_directory = tmp_path / "IGZO"
 
-    create_project_workspace(
-        project_directory,
-        name="IGZO",
+    create_project(
+        root=project_directory,
+        config=make_config(),
     )
 
-    metadata_path = project_directory / "nsdw-project.yaml"
+    metadata_path = project_directory / "project.yaml"
 
     metadata = yaml.safe_load(
         metadata_path.read_text(
             encoding="utf-8"
         )
     )
+
     metadata["schema_version"] = 999
 
     metadata_path.write_text(
@@ -147,7 +90,7 @@ def test_load_project_workspace_rejects_missing_metadata_fields(
     project_directory = tmp_path / "IGZO"
     project_directory.mkdir()
 
-    metadata_path = project_directory / "nsdw-project.yaml"
+    metadata_path = project_directory / "project.yaml"
 
     metadata_path.write_text(
         yaml.safe_dump(
@@ -174,7 +117,7 @@ def test_load_project_workspace_rejects_invalid_yaml(
     project_directory = tmp_path / "IGZO"
     project_directory.mkdir()
 
-    metadata_path = project_directory / "nsdw-project.yaml"
+    metadata_path = project_directory / "project.yaml"
 
     metadata_path.write_text(
         "schema_version: [\n",
@@ -195,17 +138,19 @@ def test_find_project_workspace_from_nested_directory(
 ) -> None:
     project_directory = tmp_path / "IGZO"
 
-    create_project_workspace(
-        project_directory,
-        name="IGZO",
+    create_project(
+        root=project_directory,
+        config=make_config(),
     )
 
     nested_directory = (
         project_directory
+        / "workflows"
         / "convergence"
         / "cutoff"
         / "600-Ry"
     )
+
     nested_directory.mkdir(
         parents=True,
     )
@@ -224,9 +169,9 @@ def test_find_project_workspace_from_project_root(
 ) -> None:
     project_directory = tmp_path / "IGZO"
 
-    create_project_workspace(
-        project_directory,
-        name="IGZO",
+    create_project(
+        root=project_directory,
+        config=make_config(),
     )
 
     workspace = find_project_workspace(
@@ -250,3 +195,29 @@ def test_find_project_workspace_raises_when_project_not_found(
         find_project_workspace(
             directory,
         )
+
+
+def test_load_project_workspace_from_scaffolded_project(
+    tmp_path: Path,
+) -> None:
+    project_directory = tmp_path / "IGZO"
+
+    config = ProjectConfig(
+        name="IGZO",
+        material="InGaZnO4",
+        nsdw_version="0.1.0",
+        components=["cp2k"],
+    )
+
+    create_project(
+        root=project_directory,
+        config=config,
+    )
+
+    workspace = load_project_workspace(
+        project_directory,
+    )
+
+    assert workspace.root == project_directory.resolve()
+    assert workspace.name == "IGZO"
+    assert workspace.schema_version == 1
