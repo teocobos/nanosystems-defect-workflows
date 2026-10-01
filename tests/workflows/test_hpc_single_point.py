@@ -1,5 +1,6 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
+from pymatgen.core import Lattice, Structure
 
 import shutil
 import pytest
@@ -283,15 +284,28 @@ def test_collect_cp2k_single_point_archer2(tmp_path):
         exit_code="0:0",
     )
 
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
     result = collect_cp2k_single_point_archer2(
         hpc_submission=hpc_submission,
         status=status,
         input_file=input_file,
         output_file=output_file,
         result_file="result.json",
+	structure=structure,
     )
 
     assert result.calculation.id == "igzo_sp"
+    assert result.structure is not None
+    assert result.structure.n_atoms == 4
 
     provenance = result.provenance.execution
 
@@ -392,12 +406,24 @@ def test_run_cp2k_single_point_archer2(
     mock_wait.return_value = status
     mock_collect.return_value = expected_result
 
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
     result = run_cp2k_single_point_archer2(
         calculation_id="igzo_sp",
         working_directory=tmp_path,
         input_file="igzo.inp",
         output_file="igzo.out",
         account="e05",
+        structure=structure,
         executor=executor,
     )
 
@@ -431,8 +457,8 @@ def test_run_cp2k_single_point_archer2(
         input_file=Path("igzo.inp"),
         output_file=Path("igzo.out"),
         result_file="result.json",
+        structure=structure,
     )
-
 @patch(
     "nsdw.workflows.hpc_single_point."
     "collect_cp2k_single_point_archer2"

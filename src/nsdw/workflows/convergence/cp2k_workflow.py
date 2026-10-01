@@ -11,6 +11,7 @@ from nsdw.workflows.convergence.analyser import (
     analyse_convergence_tail_stability,
 )
 from nsdw.workflows.convergence.cp2k_execution import (
+    collect_existing_cp2k_convergence_results,
     run_cp2k_convergence_campaign,
 )
 from nsdw.workflows.convergence.manifest import (
@@ -53,6 +54,86 @@ def _run_cp2k_convergence_pipeline(
     )
 
     return study, observations
+
+
+def _build_and_write_convergence_report(
+    *,
+    campaign_directory: Path,
+    study,
+    observations,
+) -> ConvergenceReport:
+    """Analyse observations and write convergence reports."""
+
+    observation_list = list(observations)
+
+    adjacent_analysis = analyse_convergence_energy(
+        study,
+        observation_list,
+    )
+
+    reference_analysis = analyse_convergence_against_reference(
+        study,
+        observation_list,
+    )
+
+    tail_analysis = analyse_convergence_tail_stability(
+        study,
+        observation_list,
+    )
+
+    report = build_convergence_report(
+        study=study,
+        observations=observation_list,
+        adjacent_analysis=adjacent_analysis,
+        reference_analysis=reference_analysis,
+        tail_analysis=tail_analysis,
+    )
+
+    report.write_json(
+        campaign_directory / "convergence-report.json"
+    )
+
+    report.write_csv(
+        campaign_directory / "convergence-report.csv"
+    )
+
+    return report
+
+
+def analyse_and_report_existing_cp2k_convergence_campaign(
+    *,
+    campaign_directory: str | Path,
+) -> ConvergenceReport:
+    """Analyse and report an already completed CP2K campaign."""
+
+    campaign_directory = (
+        Path(campaign_directory)
+        .expanduser()
+        .resolve()
+    )
+
+    manifest = load_convergence_manifest(
+        campaign_directory / "manifest.json"
+    )
+
+    study = convergence_study_from_manifest(
+        manifest
+    )
+
+    results = collect_existing_cp2k_convergence_results(
+        campaign_directory=campaign_directory,
+    )
+
+    observations = collect_convergence_observations(
+        candidates=tuple(study.candidates),
+        results=results,
+    )
+
+    return _build_and_write_convergence_report(
+        campaign_directory=campaign_directory,
+        study=study,
+        observations=observations,
+    )
 
 
 def run_and_analyse_cp2k_convergence_campaign(
@@ -101,37 +182,8 @@ def run_and_report_cp2k_convergence_campaign(
         environment=environment,
     )
 
-    observation_list = list(observations)
-
-    adjacent_analysis = analyse_convergence_energy(
-        study,
-        observation_list,
-    )
-
-    reference_analysis = analyse_convergence_against_reference(
-        study,
-        observation_list,
-    )
-
-    tail_analysis = analyse_convergence_tail_stability(
-        study,
-        observation_list,
-    )
-
-    report = build_convergence_report(
+    return _build_and_write_convergence_report(
+        campaign_directory=campaign_directory,
         study=study,
-        observations=observation_list,
-        adjacent_analysis=adjacent_analysis,
-        reference_analysis=reference_analysis,
-        tail_analysis=tail_analysis,
+        observations=observations,
     )
-
-    report.write_json(
-        campaign_directory / "convergence-report.json"
-    )
-
-    report.write_csv(
-        campaign_directory / "convergence-report.csv"
-    )
-
-    return report

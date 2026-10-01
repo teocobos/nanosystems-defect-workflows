@@ -239,3 +239,94 @@ def test_run_and_report_cp2k_convergence_campaign(
     assert (
         campaign_directory / "convergence-report.csv"
     ).is_file()
+
+
+def test_analyse_and_report_existing_cp2k_convergence_campaign(
+    tmp_path: Path,
+) -> None:
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        analyse_and_report_existing_cp2k_convergence_campaign,
+    )
+
+    campaign_directory = tmp_path / "study"
+    campaign_directory.mkdir()
+
+    manifest = ConvergenceStudyManifest(
+        calculator="cp2k",
+        parameter=ConvergenceParameter.CUTOFF,
+        criterion=ConvergenceCriterion(
+            energy_tolerance_ev_per_atom=1.0e-3,
+        ),
+        candidates=(
+            ConvergenceManifestCandidate(
+                label="400-Ry",
+                order=0,
+                value=Quantity(value=400.0, unit="Ry"),
+                directory="400-Ry",
+                input_file="test-400-Ry.inp",
+                coordinate_file="test-400-Ry.xyz",
+            ),
+            ConvergenceManifestCandidate(
+                label="600-Ry",
+                order=1,
+                value=Quantity(value=600.0, unit="Ry"),
+                directory="600-Ry",
+                input_file="test-600-Ry.inp",
+                coordinate_file="test-600-Ry.xyz",
+            ),
+            ConvergenceManifestCandidate(
+                label="800-Ry",
+                order=2,
+                value=Quantity(value=800.0, unit="Ry"),
+                directory="800-Ry",
+                input_file="test-800-Ry.inp",
+                coordinate_file="test-800-Ry.xyz",
+            ),
+        ),
+    )
+
+    write_convergence_manifest(
+        manifest=manifest,
+        path=campaign_directory / "manifest.json",
+    )
+
+    results = (
+        _result(
+            calculation_id="400-Ry",
+            energy_ev=-90.000,
+        ),
+        _result(
+            calculation_id="600-Ry",
+            energy_ev=-90.045,
+        ),
+        _result(
+            calculation_id="800-Ry",
+            energy_ev=-90.0495,
+        ),
+    )
+
+    with patch(
+        "nsdw.workflows.convergence.cp2k_workflow."
+        "collect_existing_cp2k_convergence_results",
+        return_value=results,
+    ) as collect_existing:
+        report = (
+            analyse_and_report_existing_cp2k_convergence_campaign(
+                campaign_directory=campaign_directory,
+            )
+        )
+
+    collect_existing.assert_called_once_with(
+        campaign_directory=campaign_directory.resolve(),
+    )
+
+    assert report.selected_candidate_label == "600-Ry"
+    assert report.energy_tolerance_satisfied
+
+    assert (
+        campaign_directory / "convergence-report.json"
+    ).is_file()
+
+    assert (
+        campaign_directory / "convergence-report.csv"
+    ).is_file()

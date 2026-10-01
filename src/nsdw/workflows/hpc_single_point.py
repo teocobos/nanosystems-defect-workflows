@@ -4,6 +4,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from pymatgen.core import Structure
+
 from nsdw.calculators.cp2k import (
     adapt_cp2k_result,
     build_archer2_cp2k_job,
@@ -117,6 +119,7 @@ def collect_cp2k_single_point_archer2(
     input_file: str | Path,
     output_file: str | Path,
     result_file: str | Path = "result.json",
+    structure: Structure | None = None,
 ) -> NSDWResult:
     """Parse and collect a completed ARCHER2 CP2K calculation."""
 
@@ -161,6 +164,7 @@ def collect_cp2k_single_point_archer2(
 
     result = adapt_cp2k_result(
         parsed_output,
+	structure=structure,
         input_settings=parsed_input,
         input_path=input_path,
         output_path=output_path,
@@ -202,6 +206,7 @@ def run_cp2k_single_point_archer2(
     module: str = "cp2k",
     executable: str = "cp2k.psmp",
     result_file: str | Path = "result.json",
+    structure: Structure | None = None,
     executor: SlurmExecutor | None = None,
     monitor_config: SlurmMonitorConfig | None = None,
 ) -> NSDWResult:
@@ -246,4 +251,5 @@ def run_cp2k_single_point_archer2(
         input_file=input_file,
         output_file=output_file,
         result_file=result_file,
+        structure=structure,
     )

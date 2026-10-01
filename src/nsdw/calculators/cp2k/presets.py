@@ -35,12 +35,30 @@ IGZO_UZH_TZV2P = CP2KBasisPotentialConfig(
     ),
 )
 
+SIO2_PBE_DZVP = CP2KBasisPotentialConfig(
+    basis_set_file="BASIS_MOLOPT",
+    potential_file="GTH_POTENTIALS",
+    kinds=(
+        CP2KKindConfig(
+            element="Si",
+            basis_set="DZVP-MOLOPT-GTH-q4",
+            potential="GTH-PBE-q4",
+        ),
+        CP2KKindConfig(
+            element="O",
+            basis_set="DZVP-MOLOPT-GTH-q6",
+            potential="GTH-PBE-q6",
+        ),
+    ),
+)
+
 
 BASIS_POTENTIAL_PRESETS: dict[
     str,
     CP2KBasisPotentialConfig,
 ] = {
     "igzo-uzh-tzv2p": IGZO_UZH_TZV2P,
+    "sio2-pbe-dzvp": SIO2_PBE_DZVP,
 }
 
 

@@ -29,12 +29,27 @@ IGZO_CIF = (
     / "igzo_crystal_ordered_003.cif"
 )
 
+SIO2_CIF = (
+    Path(__file__).parents[2]
+    / "data"
+    / "sio2"
+    / "alpha_quartz_cod1526860.cif"
+)
 
 @pytest.fixture
 def igzo_structure():
     """Return the ordered 21-atom IGZO test structure."""
 
     structure, _ = load_structure(IGZO_CIF)
+
+    return structure
+
+
+@pytest.fixture
+def sio2_structure():
+    """Return the alpha-quartz SiO2 test structure."""
+
+    structure, _ = load_structure(SIO2_CIF)
 
     return structure
 
@@ -257,6 +272,52 @@ def test_generates_verified_igzo_kinds(
     assert (
         kinds["O"].basis_set
         == "TZV2P-MOLOPT-PBE-GTH-q6"
+    )
+    assert kinds["O"].potential == "GTH-PBE-q6"
+
+
+def test_generates_verified_sio2_kinds(
+    sio2_structure,
+):
+    """The verified SiO2 PBE/DZVP assignments should be preserved."""
+
+    config = CP2KInputConfig(
+        project_name="sio2_test",
+        functional="PBE",
+        cutoff_ry=400.0,
+        relative_cutoff_ry=60.0,
+        coordinate_file="sio2.xyz",
+        basis_potential=get_basis_potential_preset(
+            "sio2-pbe-dzvp"
+        ),
+    )
+
+    text = render_cp2k_input(
+        config,
+        sio2_structure,
+    )
+
+    parsed = parse_cp2k_input_text(text)
+
+    assert parsed.basis_set_file == "BASIS_MOLOPT"
+    assert parsed.potential_file == "GTH_POTENTIALS"
+
+    kinds = {
+        kind.element: kind
+        for kind in parsed.kinds
+    }
+
+    assert set(kinds) == {"Si", "O"}
+
+    assert (
+        kinds["Si"].basis_set
+        == "DZVP-MOLOPT-GTH-q4"
+    )
+    assert kinds["Si"].potential == "GTH-PBE-q4"
+
+    assert (
+        kinds["O"].basis_set
+        == "DZVP-MOLOPT-GTH-q6"
     )
     assert kinds["O"].potential == "GTH-PBE-q6"
 

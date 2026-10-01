@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 from pymatgen.core import Lattice, Structure
+import shutil
 
 from nsdw.models.quantity import Quantity
 from nsdw.workflows.convergence.manifest import (
@@ -192,3 +193,80 @@ def test_run_cp2k_convergence_campaign_rejects_non_cp2k_manifest(
         run_cp2k_convergence_campaign(
             campaign_directory=campaign_directory,
         )
+
+
+def test_collect_existing_cp2k_convergence_results(
+    tmp_path: Path,
+) -> None:
+    from nsdw.workflows.convergence.cp2k_execution import (
+        collect_existing_cp2k_convergence_results,
+    )
+
+    campaign_directory = tmp_path / "study"
+
+    candidate_directory = (
+        campaign_directory / "400-Ry"
+    )
+    candidate_directory.mkdir(parents=True)
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
+    structure.to(
+        filename=campaign_directory / "structure.json",
+        fmt="json",
+    )
+
+    manifest = _manifest().model_copy(
+        update={
+            "candidates": (
+                _manifest().candidates[0],
+            )
+        }
+    )
+
+    write_convergence_manifest(
+        manifest=manifest,
+        path=campaign_directory / "manifest.json",
+    )
+
+    fixture_directory = (
+        Path("tests/calculators/cp2k/fixtures")
+        .resolve()
+    )
+
+    shutil.copy(
+        fixture_directory / "igzo_ordered_003_sp.inp",
+        candidate_directory / "test-400-Ry.inp",
+    )
+
+    shutil.copy(
+        fixture_directory / "igzo_ordered_003_sp_real.out",
+        candidate_directory / "calculation.out",
+    )
+
+    results = collect_existing_cp2k_convergence_results(
+        campaign_directory=campaign_directory,
+    )
+
+    assert len(results) == 1
+
+    result = results[0]
+
+    assert result.calculation.id == "400-Ry"
+    assert result.calculation.status.value == "completed"
+
+    assert result.structure is not None
+    assert result.structure.n_atoms == 4
+
+    assert result.energy is not None
+    assert result.energy.total is not None
+    assert result.energy.total.unit == "eV"
