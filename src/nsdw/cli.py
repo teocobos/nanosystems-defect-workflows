@@ -59,6 +59,22 @@ from nsdw.workflows.hpc_single_point import (
     HPCSinglePointWorkflowError,
     run_cp2k_single_point_archer2,
 )
+from nsdw.calculators.cp2k.generation_models import (
+    CP2KInputConfig,
+)
+from nsdw.calculators.cp2k.presets import (
+    get_basis_potential_preset,
+)
+from nsdw.models.quantity import Quantity
+from nsdw.workflows.convergence.cp2k_generation import (
+    CP2KConvergenceGenerationError,
+    generate_cp2k_convergence_study,
+)
+from nsdw.workflows.convergence.models import (
+    ConvergenceCandidate,
+    ConvergenceParameter,
+    ConvergenceStudyDefinition,
+)
 
 app = typer.Typer(
     name="nsdw",
@@ -1011,6 +1027,135 @@ def generate_vacancies_command(
             f"(multiplicity "
             f"{vacancy.primitive_multiplicity})"
         )
+
+# ============================================================================
+# Convergence workflows
+# ============================================================================
+
+
+@workflow_app.command("convergence-generate")
+def workflow_convergence_generate(
+    structure_file: Path = typer.Argument(
+        ...,
+        help="Input structure file.",
+    ),
+    parameter: Literal["cutoff"] = typer.Option(
+        "cutoff",
+        "--parameter",
+        "-p",
+        help="Convergence parameter.",
+    ),
+    values: list[float] = typer.Option(
+        ...,
+        "--values",
+        help="Candidate convergence value. Repeat for multiple values.",
+    ),
+    preset: str = typer.Option(
+        ...,
+        "--preset",
+        help="CP2K basis/pseudopotential preset.",
+    ),
+    output_directory: Path = typer.Option(
+        Path("convergence-study"),
+        "--output",
+        "-o",
+        help="Output directory for the convergence study.",
+    ),
+    tolerance: float = typer.Option(
+        1.0e-3,
+        "--tolerance",
+        min=0.0,
+        help="Energy convergence tolerance in eV/atom.",
+    ),
+) -> None:
+    """Generate a portable CP2K convergence study."""
+
+    try:
+        structure, parser_warnings = load_structure(
+            structure_file,
+        )
+
+        basis_potential = get_basis_potential_preset(
+            preset,
+        )
+
+        base_config = CP2KInputConfig(
+            project_name=structure_file.stem,
+            basis_potential=basis_potential,
+        )
+
+        candidates = [
+            ConvergenceCandidate(
+                label=f"{value:g}-Ry",
+                order=order,
+                value=Quantity(
+                    value=value,
+                    unit="Ry",
+                ),
+            )
+            for order, value in enumerate(values)
+        ]
+
+        study = ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter(parameter),
+            candidates=candidates,
+            criterion={
+                "energy_tolerance_ev_per_atom": tolerance,
+            },
+        )
+
+        packages = generate_cp2k_convergence_study(
+            structure=structure,
+            base_config=base_config,
+            study=study,
+            output_directory=output_directory,
+        )
+
+    except (
+        FileNotFoundError,
+        ValueError,
+        ValidationError,
+        CP2KConvergenceGenerationError,
+    ) as exc:
+        console.print(
+            f"[bold red]ERROR:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        "\n[bold green]"
+        "Convergence study generated"
+        "[/bold green]\n"
+    )
+
+    console.print(
+        f"Parameter:        {study.parameter.value}"
+    )
+
+    console.print(
+        f"Candidates:       {len(packages)}"
+    )
+
+    console.print(
+        f"Output directory: "
+        f"{output_directory.expanduser().resolve()}"
+    )
+
+    console.print(
+        f"Manifest:         "
+        f"{(output_directory / 'manifest.json').expanduser().resolve()}"
+    )
+
+    if parser_warnings:
+        console.print(
+            "\n[bold yellow]Parser warnings[/bold yellow]"
+        )
+
+        for warning in parser_warnings:
+            console.print(
+                f"[yellow]⚠[/yellow] {warning}"
+            )
+
 
 # ============================================================================
 # Single-point workflow

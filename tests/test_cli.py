@@ -3,9 +3,13 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from pymatgen.core import Lattice, Structure
 from typer.testing import CliRunner
 
 from nsdw.cli import app
+from nsdw.workflows.convergence.models import (
+    ConvergenceParameter,
+)
 
 runner = CliRunner()
 
@@ -211,6 +215,199 @@ def test_cli_cp2k_single_point_archer2_failure(
     assert "SLURM submission failed" in cli_result.stdout
 
     mock_workflow.assert_called_once()
+
+
+def test_workflow_convergence_generate_cutoff(
+    tmp_path: Path,
+) -> None:
+    structure_file = tmp_path / "igzo.xyz"
+    output_directory = tmp_path / "cutoff-study"
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
+    with (
+        patch(
+            "nsdw.cli.load_structure",
+            return_value=(structure, []),
+        ),
+        patch(
+            "nsdw.cli.generate_cp2k_convergence_study",
+            return_value=(
+                output_directory / "400-Ry",
+                output_directory / "600-Ry",
+                output_directory / "800-Ry",
+            ),
+        ) as mock_generate,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "convergence-generate",
+                str(structure_file),
+                "--parameter",
+                "cutoff",
+                "--values",
+                "400",
+                "--values",
+                "600",
+                "--values",
+                "800",
+                "--preset",
+                "igzo-uzh-tzv2p",
+                "--output",
+                str(output_directory),
+            ],
+        )
+
+    assert result.exit_code == 0
+
+    assert "Convergence study generated" in result.stdout
+    assert "cutoff" in result.stdout
+    assert "3" in result.stdout
+
+    mock_generate.assert_called_once()
+
+    kwargs = mock_generate.call_args.kwargs
+
+    assert kwargs["structure"] is structure
+    assert kwargs["output_directory"] == output_directory
+
+    base_config = kwargs["base_config"]
+
+    assert base_config.project_name == "igzo"
+    assert base_config.cutoff_ry == 600.0
+    assert base_config.relative_cutoff_ry == 60.0
+
+    study = kwargs["study"]
+
+    assert study.parameter == ConvergenceParameter.CUTOFF
+
+    assert [
+        candidate.label
+        for candidate in study.candidates
+    ] == [
+        "400-Ry",
+        "600-Ry",
+        "800-Ry",
+    ]
+
+    assert [
+        candidate.value.value
+        for candidate in study.candidates
+    ] == [
+        400.0,
+        600.0,
+        800.0,
+    ]
+
+    assert all(
+        candidate.value.unit == "Ry"
+        for candidate in study.candidates
+    )
+
+
+def test_workflow_convergence_generate_cutoff_end_to_end(
+    tmp_path: Path,
+) -> None:
+    structure_file = tmp_path / "igzo.cif"
+    output_directory = tmp_path / "cutoff-study"
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
+    structure.to(
+        filename=structure_file,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "convergence-generate",
+            str(structure_file),
+            "--parameter",
+            "cutoff",
+            "--values",
+            "400",
+            "--values",
+            "600",
+            "--values",
+            "800",
+            "--preset",
+            "igzo-uzh-tzv2p",
+            "--output",
+            str(output_directory),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    assert "Convergence study generated" in result.stdout
+
+    manifest = output_directory / "manifest.json"
+
+    assert manifest.is_file()
+
+    for label in (
+        "400-Ry",
+        "600-Ry",
+        "800-Ry",
+    ):
+        candidate_directory = (
+            output_directory / label
+        )
+
+        assert candidate_directory.is_dir()
+
+        input_files = list(
+            candidate_directory.glob("*.inp")
+        )
+
+        coordinate_files = list(
+            candidate_directory.glob("*.xyz")
+        )
+
+        assert len(input_files) == 1
+        assert len(coordinate_files) == 1
+
+    input_400 = next(
+        (output_directory / "400-Ry").glob("*.inp")
+    ).read_text()
+
+    input_600 = next(
+        (output_directory / "600-Ry").glob("*.inp")
+    ).read_text()
+
+    input_800 = next(
+        (output_directory / "800-Ry").glob("*.inp")
+    ).read_text()
+
+    assert "CUTOFF 400" in input_400
+    assert "CUTOFF 600" in input_600
+    assert "CUTOFF 800" in input_800
+
+    assert "REL_CUTOFF 60" in input_400
+    assert "REL_CUTOFF 60" in input_600
+    assert "REL_CUTOFF 60" in input_800
+
 
 def test_cli_structure_validate_xyz_with_lattice(tmp_path: Path):
     """Validate an XYZ structure using six CLI lattice parameters."""
