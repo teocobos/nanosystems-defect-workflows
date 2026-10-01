@@ -54,23 +54,34 @@ def _base_config() -> CP2KInputConfig:
 def test_generate_cutoff_study_creates_candidate_packages(
     tmp_path: Path,
 ) -> None:
+    structure = _structure()
+
     study = ConvergenceStudyDefinition(
         parameter=ConvergenceParameter.CUTOFF,
         candidates=[
             ConvergenceCandidate(
                 label="400-Ry",
                 order=0,
-                value=Quantity(value=400.0, unit="Ry"),
+                value=Quantity(
+                    value=400.0,
+                    unit="Ry",
+                ),
             ),
             ConvergenceCandidate(
                 label="600-Ry",
                 order=1,
-                value=Quantity(value=600.0, unit="Ry"),
+                value=Quantity(
+                    value=600.0,
+                    unit="Ry",
+                ),
             ),
             ConvergenceCandidate(
                 label="800-Ry",
                 order=2,
-                value=Quantity(value=800.0, unit="Ry"),
+                value=Quantity(
+                    value=800.0,
+                    unit="Ry",
+                ),
             ),
         ],
     )
@@ -78,7 +89,7 @@ def test_generate_cutoff_study_creates_candidate_packages(
     output_directory = tmp_path / "cutoff-study"
 
     packages = generate_cp2k_convergence_study(
-        structure=_structure(),
+        structure=structure,
         base_config=_base_config(),
         study=study,
         output_directory=output_directory,
@@ -86,13 +97,36 @@ def test_generate_cutoff_study_creates_candidate_packages(
 
     assert len(packages) == 3
 
-    for label in ("400-Ry", "600-Ry", "800-Ry"):
-        candidate_directory = output_directory / label
+    structure_path = (
+        output_directory / "structure.json"
+    )
+
+    assert structure_path.is_file()
+
+    stored_structure = Structure.from_file(
+        structure_path
+    )
+
+    assert stored_structure == structure
+
+    for label in (
+        "400-Ry",
+        "600-Ry",
+        "800-Ry",
+    ):
+        candidate_directory = (
+            output_directory / label
+        )
 
         assert candidate_directory.is_dir()
 
-        input_files = list(candidate_directory.glob("*.inp"))
-        coordinate_files = list(candidate_directory.glob("*.xyz"))
+        input_files = list(
+            candidate_directory.glob("*.inp")
+        )
+
+        coordinate_files = list(
+            candidate_directory.glob("*.xyz")
+        )
 
         assert len(input_files) == 1
         assert len(coordinate_files) == 1
@@ -116,6 +150,7 @@ def test_generate_cutoff_study_creates_candidate_packages(
     assert "REL_CUTOFF 60" in input_400
     assert "REL_CUTOFF 60" in input_600
     assert "REL_CUTOFF 60" in input_800
+
 
 def test_generate_relative_cutoff_study(
     tmp_path: Path,

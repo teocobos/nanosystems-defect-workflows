@@ -70,11 +70,15 @@ from nsdw.workflows.convergence.cp2k_generation import (
     CP2KConvergenceGenerationError,
     generate_cp2k_convergence_study,
 )
+from nsdw.workflows.convergence.cp2k_workflow import (
+    run_and_report_cp2k_convergence_campaign,
+)
 from nsdw.workflows.convergence.models import (
     ConvergenceCandidate,
     ConvergenceParameter,
     ConvergenceStudyDefinition,
 )
+
 
 app = typer.Typer(
     name="nsdw",
@@ -1081,6 +1085,7 @@ def workflow_convergence_generate(
 
         base_config = CP2KInputConfig(
             project_name=structure_file.stem,
+            run_type="ENERGY",
             basis_potential=basis_potential,
         )
 
@@ -1156,6 +1161,88 @@ def workflow_convergence_generate(
                 f"[yellow]⚠[/yellow] {warning}"
             )
 
+
+@workflow_app.command("convergence-run")
+def workflow_convergence_run(
+    campaign_directory: Path = typer.Argument(
+        ...,
+        help="Generated convergence campaign directory.",
+    ),
+    executable: str = typer.Option(
+        "cp2k.psmp",
+        "--executable",
+        help="CP2K executable.",
+    ),
+) -> None:
+    """Execute, analyse, and report a CP2K convergence campaign."""
+
+    campaign_directory = (
+        campaign_directory
+        .expanduser()
+        .resolve()
+    )
+
+    try:
+        report = run_and_report_cp2k_convergence_campaign(
+            campaign_directory=campaign_directory,
+            executable=executable,
+        )
+
+    except (
+        FileNotFoundError,
+        ValueError,
+        RuntimeError,
+    ) as exc:
+        console.print(
+            f"[bold red]ERROR:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        "\n[bold green]"
+        "Convergence campaign completed"
+        "[/bold green]\n"
+    )
+
+    console.print(
+        f"Parameter:        {report.parameter.value}"
+    )
+
+    if report.energy_tolerance_satisfied:
+        console.print(
+            "Status:           [bold green]Converged[/bold green]"
+        )
+    else:
+        console.print(
+            "Status:           [bold yellow]"
+            "Not converged"
+            "[/bold yellow]"
+        )
+
+    if report.selected_candidate_label is not None:
+        console.print(
+            f"Selected:         "
+            f"{report.selected_candidate_label}"
+        )
+    else:
+        console.print(
+            "Selected:         None"
+        )
+
+    console.print(
+        f"Tolerance:        "
+        f"{report.energy_tolerance_ev_per_atom:g} eV/atom"
+    )
+
+    console.print(
+        f"JSON report:      "
+        f"{campaign_directory / 'convergence-report.json'}"
+    )
+
+    console.print(
+        f"CSV report:       "
+        f"{campaign_directory / 'convergence-report.csv'}"
+    )
 
 # ============================================================================
 # Single-point workflow

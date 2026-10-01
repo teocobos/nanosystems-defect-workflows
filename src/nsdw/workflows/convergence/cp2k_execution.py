@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from pymatgen.core import Structure
 
 from nsdw.models.result import NSDWResult
 from nsdw.workflows.convergence.manifest import (
@@ -41,6 +42,27 @@ def run_cp2k_convergence_campaign(
             f"CP2K manifest, got {manifest.calculator!r}."
         )
 
+    structure_path = (
+        campaign_directory / "structure.json"
+    )
+
+    if not structure_path.is_file():
+        raise CP2KConvergenceExecutionError(
+            "CP2K convergence campaign is missing its "
+            f"canonical structure file: {structure_path}"
+        )
+
+    try:
+        structure = Structure.from_file(
+            structure_path
+        )
+
+    except Exception as exc:
+        raise CP2KConvergenceExecutionError(
+            "Could not load the canonical structure for "
+            f"CP2K convergence campaign: {structure_path}"
+        ) from exc
+
     results: list[NSDWResult] = []
 
     for candidate in manifest.candidates:
@@ -59,6 +81,7 @@ def run_cp2k_convergence_campaign(
             output_file=output_file,
             executable=executable,
             environment=environment,
+            structure=structure,
         )
 
         results.append(result)

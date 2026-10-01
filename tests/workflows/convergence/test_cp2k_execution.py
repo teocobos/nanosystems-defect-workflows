@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
+
 import pytest
+from pymatgen.core import Lattice, Structure
 
 from nsdw.models.quantity import Quantity
 from nsdw.workflows.convergence.manifest import (
@@ -62,6 +64,22 @@ def test_run_cp2k_convergence_campaign_executes_candidates_in_order(
     )
     (campaign_directory / "600-Ry").mkdir()
 
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
+    structure.to(
+        filename=campaign_directory / "structure.json",
+        fmt="json",
+    )
+
     write_convergence_manifest(
         manifest=_manifest(),
         path=campaign_directory / "manifest.json",
@@ -81,32 +99,71 @@ def test_run_cp2k_convergence_campaign_executes_candidates_in_order(
     second_call = run_single_point.call_args_list[1]
 
     assert first_call.kwargs["calculation_id"] == "400-Ry"
+
     assert (
         first_call.kwargs["working_directory"]
         == campaign_directory / "400-Ry"
     )
+
     assert (
         first_call.kwargs["input_file"]
         == Path("test-400-Ry.inp")
     )
+
     assert (
         first_call.kwargs["output_file"]
         == Path("test-400-Ry.out")
     )
 
+    first_structure = first_call.kwargs["structure"]
+
+    assert isinstance(
+        first_structure,
+        Structure,
+    )
+
+    assert len(first_structure) == 4
+
+    assert (
+        first_structure.composition.reduced_formula
+        == structure.composition.reduced_formula
+    )
+
+    assert first_structure == structure
+
     assert second_call.kwargs["calculation_id"] == "600-Ry"
+
     assert (
         second_call.kwargs["working_directory"]
         == campaign_directory / "600-Ry"
     )
+
     assert (
         second_call.kwargs["input_file"]
         == Path("test-600-Ry.inp")
     )
+
     assert (
         second_call.kwargs["output_file"]
         == Path("test-600-Ry.out")
     )
+
+    second_structure = second_call.kwargs["structure"]
+
+    assert isinstance(
+        second_structure,
+        Structure,
+    )
+
+    assert len(second_structure) == 4
+
+    assert (
+        second_structure.composition.reduced_formula
+        == structure.composition.reduced_formula
+    )
+
+    assert second_structure == structure
+
 
 def test_run_cp2k_convergence_campaign_rejects_non_cp2k_manifest(
     tmp_path: Path,

@@ -10,6 +10,9 @@ from nsdw.cli import app
 from nsdw.workflows.convergence.models import (
     ConvergenceParameter,
 )
+from nsdw.workflows.convergence.reporting import (
+    ConvergenceReport,
+)
 
 runner = CliRunner()
 
@@ -70,6 +73,48 @@ def _write_cp2k_input(
         "&END FORCE_EVAL\n",
         encoding="utf-8",
     )
+
+def _write_fake_cp2k_convergence(
+    path: Path,
+) -> None:
+    script = """#!/usr/bin/env python3
+import sys
+
+args = sys.argv
+input_file = args[args.index("-i") + 1]
+output_file = args[args.index("-o") + 1]
+
+if "400-Ry" in input_file:
+    energy = -10.000000
+elif "600-Ry" in input_file:
+    energy = -10.005000
+elif "800-Ry" in input_file:
+    energy = -10.005100
+else:
+    raise SystemExit(
+        f"Unknown convergence candidate: {input_file}"
+    )
+
+project_name = input_file.removesuffix(".inp")
+
+with open(output_file, "w") as handle:
+    handle.write(
+        "CP2K| version string: CP2K version 2026.2\\n"
+        f"GLOBAL| Project name {project_name}\\n"
+        "GLOBAL| Run type ENERGY\\n"
+        "DFT| Charge 0\\n"
+        "DFT| Multiplicity 1\\n"
+        "SCF run converged in 2 steps\\n"
+        f"ENERGY| Total FORCE_EVAL ( QS ) energy [hartree] {energy:.10f}\\n"
+        "PROGRAM ENDED AT 2026-10-01 12:00:00.000\\n"
+    )
+"""
+
+    path.write_text(
+        script,
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
 
 
 def test_cli_cp2k_single_point(
@@ -287,6 +332,7 @@ def test_workflow_convergence_generate_cutoff(
     assert base_config.project_name == "igzo"
     assert base_config.cutoff_ry == 600.0
     assert base_config.relative_cutoff_ry == 60.0
+    assert base_config.run_type == "ENERGY"
 
     study = kwargs["study"]
 
@@ -407,6 +453,185 @@ def test_workflow_convergence_generate_cutoff_end_to_end(
     assert "REL_CUTOFF 60" in input_400
     assert "REL_CUTOFF 60" in input_600
     assert "REL_CUTOFF 60" in input_800
+
+def test_workflow_convergence_run(
+    tmp_path: Path,
+) -> None:
+    campaign_directory = tmp_path / "cutoff-study"
+
+    report = ConvergenceReport(
+        parameter=ConvergenceParameter.CUTOFF,
+        energy_tolerance_ev_per_atom=1.0e-3,
+        structure_hash="a" * 64,
+        n_atoms=9,
+        reference_candidate_label="800-Ry",
+        selected_candidate_label="600-Ry",
+        energy_tolerance_satisfied=True,
+        candidates=(),
+    )
+
+    with patch(
+        "nsdw.cli.run_and_report_cp2k_convergence_campaign",
+        return_value=report,
+    ) as mock_run:
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "convergence-run",
+                str(campaign_directory),
+                "--executable",
+                "cp2k.psmp",
+            ],
+        )
+
+    assert result.exit_code == 0
+
+    assert (
+        "Convergence campaign completed"
+        in result.stdout
+    )
+
+    assert "cutoff" in result.stdout
+    assert "600-Ry" in result.stdout
+    assert "Converged" in result.stdout
+
+    mock_run.assert_called_once_with(
+        campaign_directory=campaign_directory.resolve(),
+        executable="cp2k.psmp",
+    )
+
+def test_workflow_convergence_run_failure(
+    tmp_path: Path,
+) -> None:
+    campaign_directory = tmp_path / "cutoff-study"
+
+    with patch(
+        "nsdw.cli.run_and_report_cp2k_convergence_campaign",
+        side_effect=RuntimeError(
+            "CP2K convergence campaign failed"
+        ),
+    ) as mock_run:
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "convergence-run",
+                str(campaign_directory),
+            ],
+        )
+
+    assert result.exit_code == 1
+
+    assert "ERROR:" in result.stdout
+    assert (
+        "CP2K convergence campaign failed"
+        in result.stdout
+    )
+
+    mock_run.assert_called_once_with(
+        campaign_directory=campaign_directory.resolve(),
+        executable="cp2k.psmp",
+    )
+
+def test_workflow_convergence_run_end_to_end(
+    tmp_path: Path,
+) -> None:
+    structure_file = tmp_path / "igzo.cif"
+    campaign_directory = tmp_path / "cutoff-study"
+    executable = tmp_path / "fake_cp2k_convergence"
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
+    structure.to(
+        filename=structure_file,
+    )
+
+    _write_fake_cp2k_convergence(
+        executable,
+    )
+
+    generate_result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "convergence-generate",
+            str(structure_file),
+            "--parameter",
+            "cutoff",
+            "--values",
+            "400",
+            "--values",
+            "600",
+            "--values",
+            "800",
+            "--preset",
+            "igzo-uzh-tzv2p",
+            "--output",
+            str(campaign_directory),
+        ],
+    )
+
+    assert generate_result.exit_code == 0, (
+        generate_result.output
+    )
+
+    run_result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "convergence-run",
+            str(campaign_directory),
+            "--executable",
+            str(executable),
+        ],
+    )
+
+    assert run_result.exit_code == 0, (
+        run_result.output
+    )
+
+    assert (
+        "Convergence campaign completed"
+        in run_result.stdout
+    )
+
+    assert "Converged" in run_result.stdout
+    assert "600-Ry" in run_result.stdout
+
+    assert (
+        campaign_directory / "convergence-report.json"
+    ).is_file()
+
+    assert (
+        campaign_directory / "convergence-report.csv"
+    ).is_file()
+
+    for label in (
+        "400-Ry",
+        "600-Ry",
+        "800-Ry",
+    ):
+        candidate_directory = (
+            campaign_directory / label
+        )
+
+        assert list(
+            candidate_directory.glob("*.out")
+        )
+
+        assert (
+            candidate_directory / "result.json"
+        ).is_file()
 
 
 def test_cli_structure_validate_xyz_with_lattice(tmp_path: Path):

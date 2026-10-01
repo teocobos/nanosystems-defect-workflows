@@ -108,6 +108,19 @@ def generate_cp2k_convergence_study(
     packages: list[Path] = []
 
     try:
+        # Preserve the canonical periodic structure used by every
+        # convergence candidate. Candidate XYZ files contain only
+        # execution coordinates and do not preserve the lattice.
+        output_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        structure.to(
+            filename=output_directory / "structure.json",
+            fmt="json",
+        )
+
         # Generate one CP2K package for each convergence candidate.
         for candidate in study.candidates:
             project_name = (
