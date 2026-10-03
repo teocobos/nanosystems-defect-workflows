@@ -19,31 +19,35 @@ class ProjectWorkspaceError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class ProjectMetadata:
-    """Persistent metadata describing an NSDW project."""
-
-    schema_version: int
-    name: str
-
-
-@dataclass(frozen=True)
 class ProjectWorkspace:
     """Filesystem representation of an NSDW project."""
 
     root: Path
-    metadata: ProjectMetadata
+    config: ProjectConfig
 
     @property
     def name(self) -> str:
         """Return the project name."""
 
-        return self.metadata.name
+        return self.config.name
 
     @property
     def schema_version(self) -> int:
         """Return the project schema version."""
 
-        return self.metadata.schema_version
+        return self.config.schema_version
+
+    @property
+    def material(self) -> str:
+        """Return the project material."""
+
+        return self.config.material
+
+    @property
+    def components(self) -> tuple[str, ...]:
+        """Return the enabled modelling components."""
+
+        return tuple(self.config.components)
 
 
 def load_project_workspace(
@@ -88,14 +92,9 @@ def load_project_workspace(
             f"Supported version: {PROJECT_SCHEMA_VERSION}."
         )
 
-    metadata = ProjectMetadata(
-        schema_version=config.schema_version,
-        name=config.name,
-    )
-
     return ProjectWorkspace(
-        root=root,
-        metadata=metadata,
+    root=root,
+    config=config,
     )
 
 

@@ -78,7 +78,10 @@ from nsdw.workflows.convergence.models import (
     ConvergenceParameter,
     ConvergenceStudyDefinition,
 )
-
+from nsdw.project.workspace import (
+    ProjectWorkspaceError,
+    find_project_workspace,
+)
 
 app = typer.Typer(
     name="nsdw",
@@ -247,6 +250,42 @@ def project_init(
     console.print(
         f"  cd {created_root}"
     )
+
+
+@project_app.command("info")
+def project_info() -> None:
+    """Show information about the current NSDW project."""
+
+    try:
+        workspace = find_project_workspace(
+            Path.cwd(),
+        )
+    except ProjectWorkspaceError as exc:
+        console.print(
+            f"[bold red]Error:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[bold]Project:[/bold] {workspace.name}"
+    )
+    console.print(
+        f"[bold]Material:[/bold] {workspace.material}"
+    )
+    console.print(
+        f"[bold]Root:[/bold] {workspace.root}"
+    )
+
+    if workspace.components:
+        console.print(
+            "[bold]Components:[/bold] "
+            + ", ".join(workspace.components)
+        )
+    else:
+        console.print(
+            "[bold]Components:[/bold] none"
+        )
+
 
 def _resolve_lattice_parameters(
     a: float | None,
