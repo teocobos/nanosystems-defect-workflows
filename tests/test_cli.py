@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 from pymatgen.core import Lattice, Structure
 from typer.testing import CliRunner
 
@@ -13,6 +15,8 @@ from nsdw.workflows.convergence.models import (
 from nsdw.workflows.convergence.reporting import (
     ConvergenceReport,
 )
+from nsdw.project.models import ProjectConfig
+from nsdw.project.scaffold import create_project
 
 runner = CliRunner()
 
@@ -359,6 +363,164 @@ def test_workflow_convergence_generate_cutoff(
     assert all(
         candidate.value.unit == "Ry"
         for candidate in study.candidates
+    )
+
+
+def test_workflow_convergence_generate_uses_project_directory_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "igzo-project"
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="igzo-project",
+            material="IGZO",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+        ),
+    )
+
+    structure_file = (
+        project_root
+        / "structures"
+        / "validated"
+        / "igzo.xyz"
+    )
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
+    expected_output_directory = (
+        project_root
+        / "workflows"
+        / "convergence"
+        / "cutoff"
+    )
+
+    monkeypatch.chdir(
+        project_root,
+    )
+
+    with (
+        patch(
+            "nsdw.cli.load_structure",
+            return_value=(structure, []),
+        ),
+        patch(
+            "nsdw.cli.generate_cp2k_convergence_study",
+            return_value=(
+                expected_output_directory / "400-Ry",
+                expected_output_directory / "600-Ry",
+                expected_output_directory / "800-Ry",
+            ),
+        ) as mock_generate,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "convergence-generate",
+                str(structure_file),
+                "--parameter",
+                "cutoff",
+                "--values",
+                "400",
+                "--values",
+                "600",
+                "--values",
+                "800",
+                "--preset",
+                "igzo-uzh-tzv2p",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    mock_generate.assert_called_once()
+
+    kwargs = mock_generate.call_args.kwargs
+
+    assert (
+        kwargs["output_directory"]
+        == expected_output_directory
+    )
+
+    assert "Output directory:" in result.stdout
+
+
+def test_workflow_convergence_generate_uses_standalone_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    structure_file = tmp_path / "igzo.xyz"
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["In", "Ga", "Zn", "O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.25, 0.25, 0.25],
+            [0.5, 0.5, 0.5],
+            [0.75, 0.75, 0.75],
+        ],
+    )
+
+    monkeypatch.chdir(
+        tmp_path,
+    )
+
+    with (
+        patch(
+            "nsdw.cli.load_structure",
+            return_value=(structure, []),
+        ),
+        patch(
+            "nsdw.cli.generate_cp2k_convergence_study",
+            return_value=(
+                Path("convergence-study") / "400-Ry",
+                Path("convergence-study") / "600-Ry",
+                Path("convergence-study") / "800-Ry",
+            ),
+        ) as mock_generate,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "convergence-generate",
+                str(structure_file),
+                "--parameter",
+                "cutoff",
+                "--values",
+                "400",
+                "--values",
+                "600",
+                "--values",
+                "800",
+                "--preset",
+                "igzo-uzh-tzv2p",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    mock_generate.assert_called_once()
+
+    kwargs = mock_generate.call_args.kwargs
+
+    assert (
+        kwargs["output_directory"]
+        == Path("convergence-study")
     )
 
 

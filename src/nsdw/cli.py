@@ -1098,11 +1098,15 @@ def workflow_convergence_generate(
         "--preset",
         help="CP2K basis/pseudopotential preset.",
     ),
-    output_directory: Path = typer.Option(
-        Path("convergence-study"),
+    output_directory: Path | None = typer.Option(
+        None,
         "--output",
         "-o",
-        help="Output directory for the convergence study.",
+        help=(
+            "Output directory for the convergence study. "
+            "Defaults to the current NSDW project's workflow "
+            "directory when inside a project."
+        ),
     ),
     tolerance: float = typer.Option(
         1.0e-3,
@@ -1112,6 +1116,23 @@ def workflow_convergence_generate(
     ),
 ) -> None:
     """Generate a portable CP2K convergence study."""
+
+    if output_directory is None:
+        try:
+            workspace = find_project_workspace(
+                Path.cwd(),
+            )
+        except ProjectWorkspaceError:
+            output_directory = Path(
+                "convergence-study"
+            )
+        else:
+            output_directory = (
+                workspace.root
+                / "workflows"
+                / "convergence"
+                / parameter
+            )
 
     try:
         structure, parser_warnings = load_structure(
