@@ -85,7 +85,14 @@ from nsdw.project.workspace import (
     find_project_workspace,
 )
 from nsdw.calculators.cp2k import (
+    CP2KPackageError,
     build_cp2k_environment,
+)
+from nsdw.workflows.production.cp2k import (
+    generate_cp2k_production_package,
+)
+from nsdw.workflows.production.models import (
+    CP2KProductionRecipe,
 )
 
 app = typer.Typer(
@@ -1524,6 +1531,130 @@ def workflow_convergence_run(
         f"CSV report:       "
         f"{campaign_directory / 'convergence-report.csv'}"
     )
+
+
+@workflow_app.command("production-generate")
+def workflow_production_generate(
+    structure_file: Path = typer.Argument(
+        ...,
+        help="Input structure file.",
+    ),
+    name: str = typer.Option(
+        ...,
+        "--name",
+        "-n",
+        help="Production calculation name.",
+    ),
+    charge: int = typer.Option(
+        0,
+        "--charge",
+        help="Total calculation charge.",
+    ),
+    multiplicity: int = typer.Option(
+        1,
+        "--multiplicity",
+        help="Spin multiplicity.",
+        min=1,
+    ),
+    run_type: str = typer.Option(
+        "ENERGY_FORCE",
+        "--run-type",
+        help="CP2K run type.",
+    ),
+    output_directory: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Output directory. Defaults to the current project's "
+            "working/calculations/cp2k/<name> directory."
+        ),
+    ),
+) -> None:
+    """Generate a CP2K production package from the validated project methodology."""
+
+    try:
+        workspace = find_project_workspace(
+            Path.cwd(),
+        )
+
+        structure, parser_warnings = load_structure(
+            structure_file,
+        )
+
+        recipe = CP2KProductionRecipe(
+            project_name=name,
+            run_type=run_type,
+            charge=charge,
+            multiplicity=multiplicity,
+        )
+
+        package_directory = (
+            generate_cp2k_production_package(
+                workspace=workspace,
+                structure=structure,
+                recipe=recipe,
+                output_directory=output_directory,
+            )
+        )
+
+    except (
+        ProjectWorkspaceError,
+        CP2KPackageError,
+        FileNotFoundError,
+        ValueError,
+        ValidationError,
+    ) as exc:
+        console.print(
+            f"[bold red]Error:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        "\n[bold green]"
+        "CP2K production package generated"
+        "[/bold green]\n"
+    )
+
+    console.print(
+        f"Calculation:      {name}"
+    )
+
+    console.print(
+        f"Charge:           {charge}"
+    )
+
+    console.print(
+        f"Multiplicity:     {multiplicity}"
+    )
+
+    console.print(
+        f"Run type:         {run_type}"
+    )
+
+    console.print(
+        f"Output directory: {package_directory}"
+    )
+
+    console.print(
+        f"Input file:       "
+        f"{package_directory / f'{name}.inp'}"
+    )
+
+    console.print(
+        f"Coordinate file:  "
+        f"{package_directory / f'{name}.xyz'}"
+    )
+
+    if parser_warnings:
+        console.print(
+            "\n[bold yellow]Parser warnings[/bold yellow]"
+        )
+
+        for warning in parser_warnings:
+            console.print(
+                f"[yellow]⚠[/yellow] {warning}"
+            )
 
 # ============================================================================
 # Single-point workflow

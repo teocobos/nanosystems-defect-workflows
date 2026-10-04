@@ -39,6 +39,10 @@ from nsdw.calculators.cp2k.environment import (
     resolve_cp2k_data_dir,
     validate_cp2k_data_dir,
 )
+from nsdw.calculators.cp2k.package import (
+    CP2KPackageError,
+    write_cp2k_package,
+)
 
 __all__ = [
     "ParsedCP2KMultigrid",
@@ -68,4 +72,6 @@ __all__ = [
     "build_cp2k_environment",
     "resolve_cp2k_data_dir",
     "validate_cp2k_data_dir",
+    "CP2KPackageError",
+    "write_cp2k_package",
 ]

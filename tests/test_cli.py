@@ -15,9 +15,18 @@ from nsdw.workflows.convergence.models import (
 from nsdw.workflows.convergence.reporting import (
     ConvergenceReport,
 )
-from nsdw.project.models import ProjectConfig
+from nsdw.project.models import (
+    CP2KMethodologyProvenance,
+    CP2KProductionMethodology,
+    ProjectConfig,
+)
 from nsdw.project.scaffold import create_project
-
+from nsdw.calculators.cp2k.generation_models import (
+    CP2KBasisPotentialConfig,
+    CP2KKindConfig,
+    CP2KSCFConfig,
+    CP2KXCFunctional,
+)
 runner = CliRunner()
 
 
@@ -1146,3 +1155,161 @@ def test_cli_generate_vacancies_xyz_with_lattice(
     assert result.exit_code == 0, result.output
     assert "Vacancy dataset generated" in result.output
     assert output_dir.is_dir()
+
+
+def test_workflow_production_generate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "oxide-project"
+
+    methodology = CP2KProductionMethodology(
+        status="validated",
+        functional=CP2KXCFunctional.PBE,
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        k_points=None,
+        scf=CP2KSCFConfig(),
+        basis_potential=CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="DZVP-MOLOPT-SR-GTH",
+                    potential="GTH-PBE-q6",
+                ),
+            ),
+        ),
+        provenance=CP2KMethodologyProvenance(
+            source="convergence",
+            workflow="standard_cp2k_convergence",
+        ),
+    )
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="oxide-project",
+            material="O",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+            methodology={
+                "cp2k": methodology,
+            },
+        ),
+    )
+
+    structure_file = (
+        project_root
+        / "structures"
+        / "validated"
+        / "oxygen.cif"
+    )
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+        ],
+    )
+
+    structure.to(
+        filename=structure_file,
+    )
+
+    monkeypatch.chdir(project_root)
+
+    result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "production-generate",
+            str(structure_file),
+            "--name",
+            "oxygen-neutral",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    assert (
+        "CP2K production package generated"
+        in result.stdout
+    )
+    assert "oxygen-neutral" in result.stdout
+    assert "560" not in result.stdout
+
+    package_directory = (
+        project_root
+        / "working"
+        / "calculations"
+        / "cp2k"
+        / "oxygen-neutral"
+    )
+
+    assert (
+        package_directory
+        / "oxygen-neutral.inp"
+    ).is_file()
+
+    assert (
+        package_directory
+        / "oxygen-neutral.xyz"
+    ).is_file()
+
+
+def test_workflow_production_generate_requires_validated_methodology(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "igzo-project"
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="igzo-project",
+            material="IGZO",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+        ),
+    )
+
+    structure_file = (
+        project_root
+        / "structures"
+        / "validated"
+        / "igzo.cif"
+    )
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+        ],
+    )
+
+    structure.to(
+        filename=structure_file,
+    )
+
+    monkeypatch.chdir(project_root)
+
+    result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "production-generate",
+            str(structure_file),
+            "--name",
+            "igzo-neutral",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert (
+        "No validated CP2K methodology"
+        in result.stdout
+    )
