@@ -212,6 +212,60 @@ def test_render_archer2_cp2k_script(tmp_path):
         in script
     )
 
+
+def test_render_archer2_cp2k_script_does_not_force_data_dir(
+    tmp_path,
+):
+    job = build_archer2_cp2k_job(
+        calculation_id="igzo_sp_001",
+        working_directory=tmp_path,
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+    )
+
+    script = render_slurm_script(job)
+
+    assert "module load cp2k" in script
+    assert "CP2K_DATA_DIR" not in script
+
+
+def test_render_archer2_cp2k_script_with_explicit_data_dir(
+    tmp_path,
+):
+    data_dir = tmp_path / "cp2k-data"
+
+    job = build_archer2_cp2k_job(
+        calculation_id="igzo_sp_001",
+        working_directory=tmp_path,
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        cp2k_data_dir=data_dir,
+    )
+
+    script = render_slurm_script(job)
+
+    expected_export = (
+        f"export CP2K_DATA_DIR={data_dir.resolve()}"
+    )
+
+    assert "module load cp2k" in script
+    assert expected_export in script
+
+    assert script.index(
+        "module load cp2k"
+    ) < script.index(
+        expected_export
+    )
+
+    assert script.index(
+        expected_export
+    ) < script.index(
+        "srun --hint=nomultithread"
+    )
+
+
 def test_render_archer2_cp2k_short_script(tmp_path):
     job = build_archer2_cp2k_job(
         calculation_id="sio2_sp_archer2",

@@ -174,7 +174,6 @@ def test_cli_cp2k_single_point(
         tmp_path / "cli_result.json"
     ).is_file()
 
-
 def test_cli_cp2k_single_point_invalid_data_dir(
     tmp_path: Path,
 ) -> None:
@@ -273,11 +272,57 @@ def test_cli_cp2k_single_point_archer2(
     assert kwargs["account"] == "e05-bulk-shl"
     assert kwargs["qos"] == "short"
     assert kwargs["walltime"] == "00:20:00"
+    assert kwargs["cp2k_data_dir"] is None
     assert kwargs["module"] == "cp2k/cp2k-2025.2"
 
     monitor = kwargs["monitor_config"]
     assert monitor.poll_interval == 10
     assert monitor.timeout == 1800
+
+
+@patch("nsdw.cli.run_cp2k_single_point_archer2")
+def test_cli_cp2k_single_point_archer2_data_dir(
+    mock_workflow,
+    tmp_path,
+):
+    result = Mock()
+    result.calculation.id = "sio2_sp_archer2"
+    result.calculation.status.value = "completed"
+    result.energy.total.value = -978.2388634470557
+    result.energy.total.unit = "eV"
+    result.provenance.execution.job_id = "15288186"
+
+    mock_workflow.return_value = result
+
+    data_dir = tmp_path / "cp2k-data"
+
+    cli_result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "single-point-archer2",
+            "--workdir",
+            str(tmp_path),
+            "--input",
+            "sio2_sp.inp",
+            "--output",
+            "sio2_sp.out",
+            "--result",
+            "result.json",
+            "--id",
+            "sio2_sp_archer2",
+            "--account",
+            "e05-bulk-shl",
+            "--cp2k-data-dir",
+            str(data_dir),
+        ],
+    )
+
+    assert cli_result.exit_code == 0, cli_result.output
+
+    kwargs = mock_workflow.call_args.kwargs
+
+    assert kwargs["cp2k_data_dir"] == data_dir
 
 @patch("nsdw.cli.run_cp2k_single_point_archer2")
 def test_cli_cp2k_single_point_archer2_failure(

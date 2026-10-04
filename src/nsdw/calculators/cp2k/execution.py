@@ -79,6 +79,7 @@ def build_archer2_cp2k_job(
     qos: str = "standard",
     module: str = "cp2k",
     executable: str = "cp2k.psmp",
+    cp2k_data_dir: str | Path | None = None,
 ) -> SlurmJob:
     """Build an ARCHER2 CP2K job."""
 
@@ -91,6 +92,17 @@ def build_archer2_cp2k_job(
         raise CP2KExecutionError(
             "CP2K executable cannot be empty"
         )
+
+    environment: dict[str, str] = {}
+
+    if cp2k_data_dir is not None:
+        data_dir = (
+            Path(cp2k_data_dir)
+            .expanduser()
+            .resolve()
+        )
+
+        environment["CP2K_DATA_DIR"] = str(data_dir)
 
     return build_archer2_job(
         name=calculation_id,
@@ -110,4 +122,5 @@ def build_archer2_cp2k_job(
         walltime=walltime,
         qos=qos,
         modules=(f"load {module}",),
+        environment=environment,
     )

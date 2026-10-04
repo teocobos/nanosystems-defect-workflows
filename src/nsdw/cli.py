@@ -1533,6 +1533,15 @@ def workflow_single_point_archer2(
         "--executable",
         help="CP2K executable.",
     ),
+    cp2k_data_dir: Path | None = typer.Option(
+        None,
+        "--cp2k-data-dir",
+        help=(
+            "Explicit CP2K data directory for the ARCHER2 job. "
+            "If omitted, the loaded CP2K module/install defaults "
+            "are used."
+        ),
+    ),
     poll_interval: float = typer.Option(
         10.0,
         "--poll-interval",
@@ -1567,6 +1576,7 @@ def workflow_single_point_archer2(
             qos=qos,
             module=module,
             executable=executable,
+            cp2k_data_dir=cp2k_data_dir,
             result_file=result_file,
             monitor_config=SlurmMonitorConfig(
                 poll_interval=poll_interval,

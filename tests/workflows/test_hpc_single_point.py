@@ -97,6 +97,7 @@ def test_submit_cp2k_single_point_archer2(
         qos="standard",
         module="cp2k",
         executable="cp2k.psmp",
+        cp2k_data_dir=None,
     )
 
     executor.submit.assert_called_once_with(job)
@@ -145,6 +146,7 @@ def test_submit_cp2k_single_point_archer2_custom_module(
         account="e05",
         module="cp2k/cp2k-2025.2",
         executable="cp2k.psmp",
+        cp2k_data_dir=None,
         executor=executor,
     )
 
@@ -161,6 +163,7 @@ def test_submit_cp2k_single_point_archer2_custom_module(
         qos="standard",
         module="cp2k/cp2k-2025.2",
         executable="cp2k.psmp",
+        cp2k_data_dir=None,
     )
 
 @patch(
@@ -442,6 +445,7 @@ def test_run_cp2k_single_point_archer2(
         qos="standard",
         module="cp2k",
         executable="cp2k.psmp",
+        cp2k_data_dir=None,
         executor=executor,
     )
 
@@ -535,6 +539,7 @@ def test_run_cp2k_single_point_archer2_custom_module(
         account="e05",
         module="cp2k/cp2k-2025.2",
         executable="cp2k.psmp",
+        cp2k_data_dir=None,
         executor=executor,
     )
 
@@ -551,6 +556,7 @@ def test_run_cp2k_single_point_archer2_custom_module(
         qos="standard",
         module="cp2k/cp2k-2025.2",
         executable="cp2k.psmp",
+        cp2k_data_dir=None,
         executor=executor,
     )
 
@@ -593,6 +599,7 @@ def test_submit_cp2k_single_point_archer2_short_qos(
         walltime="00:20:00",
         qos="short",
         module="cp2k/cp2k-2025.2",
+        cp2k_data_dir=None,
         executor=executor,
     )
 
@@ -608,8 +615,65 @@ def test_submit_cp2k_single_point_archer2_short_qos(
         walltime="00:20:00",
         qos="short",
         module="cp2k/cp2k-2025.2",
+        cp2k_data_dir=None,
         executable="cp2k.psmp",
     )
 
     executor.submit.assert_called_once_with(job)
     assert result.job.resources.qos == "short"
+
+
+@patch(
+    "nsdw.workflows.hpc_single_point."
+    "build_archer2_cp2k_job"
+)
+def test_submit_cp2k_single_point_archer2_data_dir(
+    mock_build_job,
+    tmp_path,
+):
+    executor = Mock()
+    data_dir = tmp_path / "cp2k-data"
+
+    job = SlurmJob(
+        name="igzo_sp",
+        calculation_id="igzo_sp",
+        working_directory=tmp_path,
+        command=("srun", "cp2k.psmp"),
+        resources=SlurmResources(
+            nodes=1,
+            tasks_per_node=128,
+            cpus_per_task=1,
+            account="e05",
+            partition="standard",
+            qos="standard",
+        ),
+    )
+
+    mock_build_job.return_value = job
+    executor.submit.return_value = _submission()
+
+    submit_cp2k_single_point_archer2(
+        calculation_id="igzo_sp",
+        working_directory=tmp_path,
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        cp2k_data_dir=data_dir,
+        executor=executor,
+    )
+
+    mock_build_job.assert_called_once_with(
+        calculation_id="igzo_sp",
+        working_directory=tmp_path,
+        input_file=Path("igzo.inp"),
+        output_file=Path("igzo.out"),
+        account="e05",
+        nodes=1,
+        tasks_per_node=128,
+        cpus_per_task=1,
+        walltime="01:00:00",
+        qos="standard",
+        module="cp2k",
+        executable="cp2k.psmp",
+        cp2k_data_dir=data_dir,
+    )

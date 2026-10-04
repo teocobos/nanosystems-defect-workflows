@@ -59,6 +59,7 @@ def submit_cp2k_single_point_archer2(
     qos: str = "standard",
     module: str = "cp2k",
     executable: str = "cp2k.psmp",
+    cp2k_data_dir: str | Path | None = None,
     executor: SlurmExecutor | None = None,
 ) -> HPCSinglePointSubmission:
     """Build and submit a CP2K single-point job to ARCHER2."""
@@ -78,6 +79,7 @@ def submit_cp2k_single_point_archer2(
         qos=qos,
         module=module,
         executable=executable,
+        cp2k_data_dir=cp2k_data_dir,
     )
 
     submission = slurm_executor.submit(job)
@@ -205,6 +207,7 @@ def run_cp2k_single_point_archer2(
     qos: str = "standard",
     module: str = "cp2k",
     executable: str = "cp2k.psmp",
+    cp2k_data_dir: str | Path | None = None,
     result_file: str | Path = "result.json",
     structure: Structure | None = None,
     executor: SlurmExecutor | None = None,
@@ -236,6 +239,7 @@ def run_cp2k_single_point_archer2(
         qos=qos,
         module=module,
         executable=executable,
+        cp2k_data_dir=cp2k_data_dir,
         executor=slurm_executor,
     )
 
