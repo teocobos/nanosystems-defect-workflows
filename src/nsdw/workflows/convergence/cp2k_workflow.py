@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from nsdw.workflows.convergence.analyser import (
-    ConvergenceTailAnalysis,
-    analyse_convergence_against_reference,
-    analyse_convergence_energy,
-    analyse_convergence_tail_stability,
-)
+from pymatgen.core import Structure
+
+from nsdw.calculators.cp2k.generation_models import CP2KInputConfig
+
 from nsdw.workflows.convergence.cp2k_execution import (
     collect_existing_cp2k_convergence_results,
     run_cp2k_convergence_campaign,
+)
+from nsdw.workflows.convergence.cp2k_generation import (
+    generate_cp2k_convergence_study,
 )
 from nsdw.workflows.convergence.manifest import (
     convergence_study_from_manifest,
@@ -21,10 +23,23 @@ from nsdw.workflows.convergence.manifest import (
 from nsdw.workflows.convergence.observation import (
     collect_convergence_observations,
 )
+from nsdw.workflows.convergence.recipes import (
+    apply_selected_cutoff,
+    build_standard_cp2k_cutoff_study,
+    build_standard_cp2k_relative_cutoff_study,
+    selected_ry_value,
+)
 from nsdw.workflows.convergence.reporting import (
     ConvergenceReport,
     build_convergence_report,
 )
+from nsdw.workflows.convergence.analyser import (
+    ConvergenceTailAnalysis,
+    analyse_convergence_against_reference,
+    analyse_convergence_energy,
+    analyse_convergence_tail_stability,
+)
+
 
 def _run_cp2k_convergence_pipeline(
     *,
@@ -186,4 +201,90 @@ def run_and_report_cp2k_convergence_campaign(
         campaign_directory=campaign_directory,
         study=study,
         observations=observations,
+    )
+
+
+@dataclass(frozen=True)
+class CP2KStandardConvergenceResult:
+    """Result of the standard chained CP2K convergence recipe."""
+
+    cutoff_ry: float
+    relative_cutoff_ry: float
+    cutoff_report: ConvergenceReport
+    relative_cutoff_report: ConvergenceReport
+    converged_config: CP2KInputConfig
+
+
+def run_standard_cp2k_convergence_recipe(
+    *,
+    structure: Structure,
+    base_config: CP2KInputConfig,
+    workflow_directory: str | Path,
+) -> CP2KStandardConvergenceResult:
+    """Run the standard chained CP2K convergence recipe."""
+
+    workflow_directory = Path(workflow_directory)
+
+    cutoff_study = build_standard_cp2k_cutoff_study()
+    cutoff_directory = workflow_directory / "cutoff"
+
+    generate_cp2k_convergence_study(
+        structure=structure,
+        base_config=base_config,
+        study=cutoff_study,
+        output_directory=cutoff_directory,
+    )
+
+    cutoff_report = run_and_report_cp2k_convergence_campaign(
+        campaign_directory=cutoff_directory,
+    )
+
+    cutoff_ry = selected_ry_value(
+        study=cutoff_study,
+        analysis=cutoff_report,
+    )
+
+    relative_base_config = apply_selected_cutoff(
+        base_config=base_config,
+        study=cutoff_study,
+        analysis=cutoff_report,
+    )
+
+    relative_cutoff_study = (
+        build_standard_cp2k_relative_cutoff_study()
+    )
+    relative_cutoff_directory = (
+        workflow_directory / "relative_cutoff"
+    )
+
+    generate_cp2k_convergence_study(
+        structure=structure,
+        base_config=relative_base_config,
+        study=relative_cutoff_study,
+        output_directory=relative_cutoff_directory,
+    )
+
+    relative_cutoff_report = (
+        run_and_report_cp2k_convergence_campaign(
+            campaign_directory=relative_cutoff_directory,
+        )
+    )
+
+    relative_cutoff_ry = selected_ry_value(
+        study=relative_cutoff_study,
+        analysis=relative_cutoff_report,
+    )
+
+    converged_config = relative_base_config.model_copy(
+        update={
+            "relative_cutoff_ry": relative_cutoff_ry,
+        }
+    )
+
+    return CP2KStandardConvergenceResult(
+        cutoff_ry=cutoff_ry,
+        relative_cutoff_ry=relative_cutoff_ry,
+        cutoff_report=cutoff_report,
+        relative_cutoff_report=relative_cutoff_report,
+        converged_config=converged_config,
     )
