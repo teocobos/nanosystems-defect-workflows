@@ -149,3 +149,118 @@ def test_build_cp2k_environment_overrides_existing_cp2k_data_dir(
     )
 
     assert result["CP2K_DATA_DIR"] == str(explicit.resolve())
+
+
+def test_build_cp2k_environment_inherits_process_cp2k_data_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    data_dir = tmp_path / "process-data"
+    data_dir.mkdir()
+
+    monkeypatch.setenv(
+        "CP2K_DATA_DIR",
+        str(data_dir),
+    )
+
+    result = build_cp2k_environment(
+        environment={
+            "OMP_NUM_THREADS": "4",
+        },
+    )
+
+    assert result["OMP_NUM_THREADS"] == "4"
+    assert result["CP2K_DATA_DIR"] == str(
+        data_dir.resolve()
+    )
+
+
+def test_caller_cp2k_data_dir_overrides_process_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    process_data_dir = tmp_path / "process-data"
+    caller_data_dir = tmp_path / "caller-data"
+
+    process_data_dir.mkdir()
+    caller_data_dir.mkdir()
+
+    monkeypatch.setenv(
+        "CP2K_DATA_DIR",
+        str(process_data_dir),
+    )
+
+    result = build_cp2k_environment(
+        environment={
+            "CP2K_DATA_DIR": str(caller_data_dir),
+            "OMP_NUM_THREADS": "8",
+        },
+    )
+
+    assert result["CP2K_DATA_DIR"] == str(
+        caller_data_dir.resolve()
+    )
+
+    assert result["OMP_NUM_THREADS"] == "8"
+
+
+def test_resolve_cp2k_data_dir_from_executable_installation(
+    tmp_path: Path,
+):
+    prefix = tmp_path / "cp2k-install"
+    bin_dir = prefix / "bin"
+    data_dir = prefix / "share" / "cp2k" / "data"
+
+    bin_dir.mkdir(parents=True)
+    data_dir.mkdir(parents=True)
+
+    executable = bin_dir / "cp2k.psmp"
+    executable.write_text(
+        "#!/bin/sh\n",
+        encoding="utf-8",
+    )
+
+    result = resolve_cp2k_data_dir(
+        executable=executable,
+        environment={},
+    )
+
+    assert result == data_dir.resolve()
+
+
+def test_executable_relative_discovery_validates_required_files(
+    tmp_path: Path,
+):
+    prefix = tmp_path / "cp2k-install"
+    bin_dir = prefix / "bin"
+    data_dir = prefix / "share" / "cp2k" / "data"
+
+    bin_dir.mkdir(parents=True)
+    data_dir.mkdir(parents=True)
+
+    executable = bin_dir / "cp2k.psmp"
+    executable.write_text(
+        "#!/bin/sh\n",
+        encoding="utf-8",
+    )
+
+    (data_dir / "BASIS_MOLOPT").write_text(
+        "basis",
+        encoding="utf-8",
+    )
+
+    (data_dir / "GTH_POTENTIALS").write_text(
+        "potential",
+        encoding="utf-8",
+    )
+
+    result = resolve_cp2k_data_dir(
+        executable=executable,
+        environment={},
+        required_files=(
+            "BASIS_MOLOPT",
+            "GTH_POTENTIALS",
+        ),
+    )
+
+    assert result == data_dir.resolve()

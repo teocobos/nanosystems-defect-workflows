@@ -160,13 +160,23 @@ def build_cp2k_environment(
     environment: Mapping[str, str] | None = None,
     required_files: Sequence[str] = (),
 ) -> dict[str, str]:
-    """Build an execution environment containing a resolved CP2K data path."""
+    """Build an execution environment containing a resolved CP2K data path.
+
+    CP2K discovery uses the current process environment plus any
+    caller-supplied overrides. The returned mapping contains only the
+    caller-supplied values together with the resolved ``CP2K_DATA_DIR``.
+    """
+    discovery_environment = dict(os.environ)
+
+    if environment is not None:
+        discovery_environment.update(environment)
+
     merged = dict(environment or {})
 
     data_dir = resolve_cp2k_data_dir(
         explicit=explicit_data_dir,
         executable=executable,
-        environment=merged if environment is not None else None,
+        environment=discovery_environment,
         required_files=required_files,
     )
 
