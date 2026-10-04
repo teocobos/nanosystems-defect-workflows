@@ -121,11 +121,15 @@ with open(output_file, "w") as handle:
     path.chmod(0o755)
 
 
+
 def test_cli_cp2k_single_point(
     tmp_path,
 ):
     executable = tmp_path / "fake_cp2k"
     input_path = tmp_path / "cli_test.inp"
+    data_dir = tmp_path / "cp2k-data"
+
+    data_dir.mkdir()
 
     _write_fake_cp2k(executable)
     _write_cp2k_input(input_path)
@@ -147,10 +151,12 @@ def test_cli_cp2k_single_point(
             "cli_result.json",
             "--executable",
             str(executable),
+            "--cp2k-data-dir",
+            str(data_dir),
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
 
     assert (
         "Single-point workflow completed"
@@ -167,6 +173,43 @@ def test_cli_cp2k_single_point(
     assert (
         tmp_path / "cli_result.json"
     ).is_file()
+
+
+def test_cli_cp2k_single_point_invalid_data_dir(
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "fake_cp2k"
+    input_path = tmp_path / "cli_test.inp"
+    missing_data_dir = tmp_path / "missing-cp2k-data"
+
+    _write_fake_cp2k(executable)
+    _write_cp2k_input(input_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "single-point",
+            "--calculator",
+            "cp2k",
+            "--workdir",
+            str(tmp_path),
+            "--input",
+            "cli_test.inp",
+            "--executable",
+            str(executable),
+            "--cp2k-data-dir",
+            str(missing_data_dir),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "ERROR:" in result.stdout
+    assert (
+        "CP2K data directory does not exist"
+        in result.stdout
+    )
+
 
 @patch("nsdw.cli.run_cp2k_single_point_archer2")
 def test_cli_cp2k_single_point_archer2(
@@ -616,6 +659,7 @@ def test_workflow_convergence_generate_cutoff_end_to_end(
     assert "REL_CUTOFF 60" in input_600
     assert "REL_CUTOFF 60" in input_800
 
+
 def test_workflow_convergence_run(
     tmp_path: Path,
 ) -> None:
@@ -632,10 +676,20 @@ def test_workflow_convergence_run(
         candidates=(),
     )
 
-    with patch(
-        "nsdw.cli.run_and_report_cp2k_convergence_campaign",
-        return_value=report,
-    ) as mock_run:
+    execution_environment = {
+        "CP2K_DATA_DIR": "/fake/cp2k/data",
+    }
+
+    with (
+        patch(
+            "nsdw.cli.build_cp2k_environment",
+            return_value=execution_environment,
+        ) as mock_environment,
+        patch(
+            "nsdw.cli.run_and_report_cp2k_convergence_campaign",
+            return_value=report,
+        ) as mock_run,
+    ):
         result = runner.invoke(
             app,
             [
@@ -647,7 +701,7 @@ def test_workflow_convergence_run(
             ],
         )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
 
     assert (
         "Convergence campaign completed"
@@ -658,22 +712,98 @@ def test_workflow_convergence_run(
     assert "600-Ry" in result.stdout
     assert "Converged" in result.stdout
 
+    mock_environment.assert_called_once_with(
+        explicit_data_dir=None,
+        executable="cp2k.psmp",
+    )
+
     mock_run.assert_called_once_with(
         campaign_directory=campaign_directory.resolve(),
         executable="cp2k.psmp",
+        environment=execution_environment,
     )
+
+
+
+def test_workflow_convergence_run_passes_explicit_cp2k_data_dir(
+    tmp_path: Path,
+) -> None:
+    campaign_directory = tmp_path / "cutoff-study"
+    data_dir = tmp_path / "cp2k-data"
+
+    report = ConvergenceReport(
+        parameter=ConvergenceParameter.CUTOFF,
+        energy_tolerance_ev_per_atom=1.0e-3,
+        structure_hash="a" * 64,
+        n_atoms=9,
+        reference_candidate_label="800-Ry",
+        selected_candidate_label="600-Ry",
+        energy_tolerance_satisfied=True,
+        candidates=(),
+    )
+
+    execution_environment = {
+        "CP2K_DATA_DIR": str(data_dir.resolve()),
+    }
+
+    with (
+        patch(
+            "nsdw.cli.build_cp2k_environment",
+            return_value=execution_environment,
+        ) as mock_environment,
+        patch(
+            "nsdw.cli.run_and_report_cp2k_convergence_campaign",
+            return_value=report,
+        ) as mock_run,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "convergence-run",
+                str(campaign_directory),
+                "--executable",
+                "custom-cp2k",
+                "--cp2k-data-dir",
+                str(data_dir),
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    mock_environment.assert_called_once_with(
+        explicit_data_dir=data_dir,
+        executable="custom-cp2k",
+    )
+
+    mock_run.assert_called_once_with(
+        campaign_directory=campaign_directory.resolve(),
+        executable="custom-cp2k",
+        environment=execution_environment,
+    )
+
 
 def test_workflow_convergence_run_failure(
     tmp_path: Path,
 ) -> None:
     campaign_directory = tmp_path / "cutoff-study"
 
-    with patch(
-        "nsdw.cli.run_and_report_cp2k_convergence_campaign",
-        side_effect=RuntimeError(
-            "CP2K convergence campaign failed"
+    execution_environment = {
+        "CP2K_DATA_DIR": "/fake/cp2k/data",
+    }
+
+    with (
+        patch(
+            "nsdw.cli.build_cp2k_environment",
+            return_value=execution_environment,
         ),
-    ) as mock_run:
+        patch(
+            "nsdw.cli.run_and_report_cp2k_convergence_campaign",
+            side_effect=RuntimeError(
+                "CP2K convergence campaign failed"
+            ),
+        ) as mock_run,
+    ):
         result = runner.invoke(
             app,
             [
@@ -684,7 +814,6 @@ def test_workflow_convergence_run_failure(
         )
 
     assert result.exit_code == 1
-
     assert "ERROR:" in result.stdout
     assert (
         "CP2K convergence campaign failed"
@@ -694,6 +823,7 @@ def test_workflow_convergence_run_failure(
     mock_run.assert_called_once_with(
         campaign_directory=campaign_directory.resolve(),
         executable="cp2k.psmp",
+        environment=execution_environment,
     )
 
 def test_workflow_convergence_run_end_to_end(
@@ -702,6 +832,9 @@ def test_workflow_convergence_run_end_to_end(
     structure_file = tmp_path / "igzo.cif"
     campaign_directory = tmp_path / "cutoff-study"
     executable = tmp_path / "fake_cp2k_convergence"
+    data_dir = tmp_path / "cp2k-data"
+
+    data_dir.mkdir()
 
     structure = Structure(
         lattice=Lattice.cubic(5.0),
@@ -755,6 +888,8 @@ def test_workflow_convergence_run_end_to_end(
             str(campaign_directory),
             "--executable",
             str(executable),
+            "--cp2k-data-dir",
+            str(data_dir),
         ],
     )
 

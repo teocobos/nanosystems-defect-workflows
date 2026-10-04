@@ -82,6 +82,9 @@ from nsdw.project.workspace import (
     ProjectWorkspaceError,
     find_project_workspace,
 )
+from nsdw.calculators.cp2k import (
+    build_cp2k_environment,
+)
 
 app = typer.Typer(
     name="nsdw",
@@ -1233,6 +1236,14 @@ def workflow_convergence_run(
         "--executable",
         help="CP2K executable.",
     ),
+    cp2k_data_dir: Path | None = typer.Option(
+        None,
+        "--cp2k-data-dir",
+        help=(
+            "CP2K data directory. Overrides CP2K_DATA_DIR "
+            "and automatic installation discovery."
+        ),
+    ),
 ) -> None:
     """Execute, analyse, and report a CP2K convergence campaign."""
 
@@ -1243,9 +1254,15 @@ def workflow_convergence_run(
     )
 
     try:
+        execution_environment = build_cp2k_environment(
+            explicit_data_dir=cp2k_data_dir,
+            executable=executable,
+        )
+
         report = run_and_report_cp2k_convergence_campaign(
             campaign_directory=campaign_directory,
             executable=executable,
+            environment=execution_environment,
         )
 
     except (
@@ -1351,6 +1368,14 @@ def workflow_single_point(
         "--executable",
         help="CP2K executable.",
     ),
+    cp2k_data_dir: Path | None = typer.Option(
+        None,
+        "--cp2k-data-dir",
+        help=(
+            "CP2K data directory. Overrides CP2K_DATA_DIR "
+            "and automatic installation discovery."
+        ),
+    ),
 ) -> None:
     """
     Run a local single-point calculation and build an NSDW result.
@@ -1367,15 +1392,21 @@ def workflow_single_point(
 
     try:
         if calculator == "cp2k":
+            execution_environment = build_cp2k_environment(
+                explicit_data_dir=cp2k_data_dir,
+                executable=executable,
+            )
+
             result = run_cp2k_single_point(
                 calculation_id=calculation_id,
                 working_directory=workdir,
                 input_file=input_file,
                 output_file=output_file,
                 executable=executable,
+                environment=execution_environment,
                 result_file=result_file,
             )
-
+            
     except (
         FileNotFoundError,
         SinglePointWorkflowError,

@@ -31,6 +31,14 @@ from nsdw.calculators.cp2k.execution import (
     build_archer2_cp2k_job,
     build_cp2k_execution_request,
 )
+from nsdw.calculators.cp2k.environment import (
+    CP2KEnvironmentError,
+    CP2KDataDirectoryNotFoundError,
+    CP2KDataFileNotFoundError,
+    build_cp2k_environment,
+    resolve_cp2k_data_dir,
+    validate_cp2k_data_dir,
+)
 
 __all__ = [
     "ParsedCP2KMultigrid",
@@ -54,4 +62,10 @@ __all__ = [
     "CP2KExecutionError",
     "build_cp2k_execution_request",
     "build_archer2_cp2k_job",
+    "CP2KEnvironmentError",
+    "CP2KDataDirectoryNotFoundError",
+    "CP2KDataFileNotFoundError",
+    "build_cp2k_environment",
+    "resolve_cp2k_data_dir",
+    "validate_cp2k_data_dir",
 ]
