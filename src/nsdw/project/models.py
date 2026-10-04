@@ -4,6 +4,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from nsdw.calculators.cp2k.generation_models import (
+    CP2KBasisPotentialConfig,
+    CP2KSCFConfig,
+    CP2KXCFunctional,
+)
+
 
 ProjectComponent = Literal[
     "cp2k",
@@ -18,6 +24,71 @@ COMPONENT_ORDER: tuple[ProjectComponent, ...] = (
     "lammps",
     "mace",
 )
+
+MethodologyStatus = Literal[
+    "candidate",
+    "validated",
+]
+
+
+class CP2KMethodologyProvenance(BaseModel):
+    """Provenance describing how a CP2K methodology was selected."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
+
+    source: str = Field(
+        min_length=1,
+    )
+
+    workflow: str = Field(
+        min_length=1,
+    )
+
+    cutoff_report: str | None = None
+
+    relative_cutoff_report: str | None = None
+
+
+class CP2KProductionMethodology(BaseModel):
+    """Persistent scientific CP2K methodology for production work."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
+
+    status: MethodologyStatus = "validated"
+
+    functional: CP2KXCFunctional
+
+    cutoff_ry: float = Field(
+        gt=0,
+    )
+
+    relative_cutoff_ry: float = Field(
+        gt=0,
+    )
+
+    k_points: tuple[int, int, int] | None = None
+
+    scf: CP2KSCFConfig
+
+    basis_potential: CP2KBasisPotentialConfig | None = None
+
+    provenance: CP2KMethodologyProvenance
+
+
+class ProjectMethodology(BaseModel):
+    """Validated scientific methodologies associated with a project."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    cp2k: CP2KProductionMethodology | None = None
 
 
 class ProjectConfig(BaseModel):
@@ -44,6 +115,10 @@ class ProjectConfig(BaseModel):
 
     components: list[ProjectComponent] = Field(
         default_factory=list,
+    )
+
+    methodology: ProjectMethodology = Field(
+        default_factory=ProjectMethodology,
     )
 
     @field_validator("components")

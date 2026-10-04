@@ -25,7 +25,9 @@ from nsdw.workflows.convergence.models import (
 from pymatgen.core import Lattice, Structure
 
 from nsdw.calculators.cp2k.generation_models import (
+    CP2KBasisPotentialConfig,
     CP2KInputConfig,
+    CP2KSCFConfig,
 )
 from nsdw.workflows.convergence.reporting import (
     ConvergenceReport,
@@ -35,6 +37,9 @@ import pytest
 from nsdw.workflows.convergence.recipes import (
     ConvergenceRecipeError,
 )
+from nsdw.project.models import ProjectConfig
+from nsdw.project.scaffold import create_project
+from nsdw.project.workspace import load_project_workspace
 
 
 def _result(
@@ -386,10 +391,15 @@ def test_run_standard_cp2k_convergence_recipe_chains_stages(
         parameter=ConvergenceParameter.CUTOFF,
         selected_candidate_label="560-Ry",
     )
+
     relative_cutoff_report = _report(
         parameter=ConvergenceParameter.RELATIVE_CUTOFF,
         selected_candidate_label="40-Ry",
     )
+
+    execution_environment = {
+    "CP2K_DATA_DIR": "/fake/cp2k/data",
+    }
 
     workflow_directory = tmp_path / "convergence"
 
@@ -406,15 +416,41 @@ def test_run_standard_cp2k_convergence_recipe_chains_stages(
                 relative_cutoff_report,
             ),
         ) as run_and_report,
+        patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "write_cp2k_methodology_candidate",
+        ) as write_candidate,
     ):
         result = run_standard_cp2k_convergence_recipe(
             structure=structure,
             base_config=base_config,
             workflow_directory=workflow_directory,
+            executable="custom-cp2k",
+            environment=execution_environment,
         )
 
     assert generate.call_count == 2
     assert run_and_report.call_count == 2
+
+    first_run = run_and_report.call_args_list[0].kwargs
+
+    assert first_run == {
+        "campaign_directory": (
+            workflow_directory / "cutoff"
+        ),
+        "executable": "custom-cp2k",
+        "environment": execution_environment,
+    }
+
+    second_run = run_and_report.call_args_list[1].kwargs
+
+    assert second_run == {
+        "campaign_directory": (
+            workflow_directory / "relative_cutoff"
+        ),
+        "executable": "custom-cp2k",
+        "environment": execution_environment,
+    }
 
     cutoff_generation = generate.call_args_list[0].kwargs
 
@@ -449,6 +485,10 @@ def test_run_standard_cp2k_convergence_recipe_chains_stages(
     assert result.cutoff_report is cutoff_report
     assert result.relative_cutoff_report is relative_cutoff_report
 
+    write_candidate.assert_called_once_with(
+        result=result,
+        workflow_directory=workflow_directory,
+    )
 
 def test_standard_cp2k_convergence_recipe_stops_if_cutoff_not_converged(
     tmp_path: Path,
@@ -575,3 +615,534 @@ def test_standard_cp2k_convergence_recipe_stops_if_relative_cutoff_not_converged
     # configuration may be returned without relative-cutoff convergence.
     assert generate.call_count == 2
     assert run_and_report.call_count == 2
+
+
+def test_build_cp2k_production_methodology_from_convergence_result(
+) -> None:
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        CP2KStandardConvergenceResult,
+        build_cp2k_production_methodology,
+    )
+
+    cutoff_report = _report(
+        parameter=ConvergenceParameter.CUTOFF,
+        selected_candidate_label="560-Ry",
+    )
+
+    relative_cutoff_report = _report(
+        parameter=ConvergenceParameter.RELATIVE_CUTOFF,
+        selected_candidate_label="40-Ry",
+    )
+
+    scf = CP2KSCFConfig(
+        eps_scf=1.0e-7,
+        max_scf=150,
+    )
+
+    basis_potential = CP2KBasisPotentialConfig(
+        basis_set_file="BASIS_MOLOPT",
+        potential_file="GTH_POTENTIALS",
+        kinds=(),
+    )
+
+    converged_config = CP2KInputConfig(
+        project_name="igzo",
+        run_type="ENERGY",
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        scf=scf,
+        basis_potential=basis_potential,
+    )
+
+    result = CP2KStandardConvergenceResult(
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        cutoff_report=cutoff_report,
+        relative_cutoff_report=relative_cutoff_report,
+        converged_config=converged_config,
+    )
+
+    methodology = build_cp2k_production_methodology(
+        result=result,
+        cutoff_report_path=(
+            "workflows/convergence/cutoff/"
+            "convergence-report.json"
+        ),
+        relative_cutoff_report_path=(
+            "workflows/convergence/relative_cutoff/"
+            "convergence-report.json"
+        ),
+    )
+
+    assert methodology.status == "validated"
+    assert methodology.functional.value == "PBE"
+
+    assert methodology.cutoff_ry == 560.0
+    assert methodology.relative_cutoff_ry == 40.0
+
+    assert methodology.scf.eps_scf == 1.0e-7
+    assert methodology.scf.max_scf == 150
+
+    assert methodology.basis_potential is not None
+    assert (
+        methodology.basis_potential.basis_set_file
+        == "BASIS_MOLOPT"
+    )
+    assert (
+        methodology.basis_potential.potential_file
+        == "GTH_POTENTIALS"
+    )
+
+    assert methodology.provenance.source == "convergence"
+    assert (
+        methodology.provenance.workflow
+        == "standard_cp2k_convergence"
+    )
+
+    assert (
+        methodology.provenance.cutoff_report
+        == (
+            "workflows/convergence/cutoff/"
+            "convergence-report.json"
+        )
+    )
+
+    assert (
+        methodology.provenance.relative_cutoff_report
+        == (
+            "workflows/convergence/relative_cutoff/"
+            "convergence-report.json"
+        )
+    )
+
+
+def test_persist_cp2k_convergence_methodology(
+    tmp_path: Path,
+) -> None:
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        CP2KStandardConvergenceResult,
+        persist_cp2k_convergence_methodology,
+    )
+
+    project_root = tmp_path / "igzo-project"
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="IGZO defect study",
+            material="InGaZnO4",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+        ),
+    )
+
+    workflow_directory = (
+        project_root
+        / "workflows"
+        / "convergence"
+    )
+
+    cutoff_directory = (
+        workflow_directory
+        / "cutoff"
+    )
+
+    relative_cutoff_directory = (
+        workflow_directory
+        / "relative_cutoff"
+    )
+
+    cutoff_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    relative_cutoff_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        cutoff_directory
+        / "convergence-report.json"
+    ).write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    (
+        relative_cutoff_directory
+        / "convergence-report.json"
+    ).write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    cutoff_report = _report(
+        parameter=ConvergenceParameter.CUTOFF,
+        selected_candidate_label="560-Ry",
+    )
+
+    relative_cutoff_report = _report(
+        parameter=ConvergenceParameter.RELATIVE_CUTOFF,
+        selected_candidate_label="40-Ry",
+    )
+
+    converged_config = CP2KInputConfig(
+        project_name="igzo",
+        run_type="ENERGY",
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        scf=CP2KSCFConfig(),
+        basis_potential=CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(),
+        ),
+    )
+
+    convergence_result = CP2KStandardConvergenceResult(
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        cutoff_report=cutoff_report,
+        relative_cutoff_report=relative_cutoff_report,
+        converged_config=converged_config,
+    )
+
+    updated_workspace = (
+        persist_cp2k_convergence_methodology(
+            project_root=project_root,
+            result=convergence_result,
+            workflow_directory=workflow_directory,
+        )
+    )
+
+    assert updated_workspace.name == "IGZO defect study"
+    assert updated_workspace.material == "InGaZnO4"
+    assert updated_workspace.components == ("cp2k",)
+
+    reloaded = load_project_workspace(
+        project_root
+    )
+
+    methodology = reloaded.config.methodology.cp2k
+
+    assert methodology is not None
+    assert methodology.status == "validated"
+
+    assert methodology.cutoff_ry == 560.0
+    assert methodology.relative_cutoff_ry == 40.0
+
+    assert methodology.basis_potential is not None
+    assert (
+        methodology.basis_potential.basis_set_file
+        == "BASIS_MOLOPT"
+    )
+    assert (
+        methodology.basis_potential.potential_file
+        == "GTH_POTENTIALS"
+    )
+
+    assert (
+        methodology.provenance.cutoff_report
+        == (
+            "workflows/convergence/cutoff/"
+            "convergence-report.json"
+        )
+    )
+
+    assert (
+        methodology.provenance.relative_cutoff_report
+        == (
+            "workflows/convergence/relative_cutoff/"
+            "convergence-report.json"
+        )
+    )
+
+
+def test_write_and_load_cp2k_methodology_candidate(
+    tmp_path: Path,
+) -> None:
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        CP2KStandardConvergenceResult,
+        load_cp2k_methodology_candidate,
+        write_cp2k_methodology_candidate,
+    )
+
+    workflow_directory = (
+        tmp_path
+        / "workflows"
+        / "convergence"
+    )
+
+    cutoff_report = _report(
+        parameter=ConvergenceParameter.CUTOFF,
+        selected_candidate_label="560-Ry",
+    )
+
+    relative_cutoff_report = _report(
+        parameter=ConvergenceParameter.RELATIVE_CUTOFF,
+        selected_candidate_label="40-Ry",
+    )
+
+    converged_config = CP2KInputConfig(
+        project_name="igzo",
+        run_type="ENERGY",
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        scf=CP2KSCFConfig(
+            eps_scf=1.0e-7,
+            max_scf=150,
+        ),
+        basis_potential=CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(),
+        ),
+    )
+
+    result = CP2KStandardConvergenceResult(
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        cutoff_report=cutoff_report,
+        relative_cutoff_report=relative_cutoff_report,
+        converged_config=converged_config,
+    )
+
+    candidate_path = (
+        write_cp2k_methodology_candidate(
+            result=result,
+            workflow_directory=workflow_directory,
+        )
+    )
+
+    assert candidate_path == (
+        workflow_directory
+        / "methodology-candidate.yaml"
+    ).resolve()
+
+    assert candidate_path.is_file()
+
+    methodology = load_cp2k_methodology_candidate(
+        candidate_path
+    )
+
+    assert methodology.status == "candidate"
+    assert methodology.functional.value == "PBE"
+
+    assert methodology.cutoff_ry == 560.0
+    assert methodology.relative_cutoff_ry == 40.0
+
+    assert methodology.scf.eps_scf == 1.0e-7
+    assert methodology.scf.max_scf == 150
+
+    assert methodology.basis_potential is not None
+    assert (
+        methodology.basis_potential.basis_set_file
+        == "BASIS_MOLOPT"
+    )
+    assert (
+        methodology.basis_potential.potential_file
+        == "GTH_POTENTIALS"
+    )
+
+    assert (
+        methodology.provenance.cutoff_report
+        == "cutoff/convergence-report.json"
+    )
+
+    assert (
+        methodology.provenance.relative_cutoff_report
+        == (
+            "relative_cutoff/"
+            "convergence-report.json"
+        )
+    )
+
+
+def test_load_cp2k_methodology_candidate_rejects_validated_status(
+    tmp_path: Path,
+) -> None:
+    candidate_path = (
+        tmp_path
+        / "methodology-candidate.yaml"
+    )
+
+    candidate_path.write_text(
+        "\n".join(
+            [
+                "status: validated",
+                "functional: PBE",
+                "cutoff_ry: 560.0",
+                "relative_cutoff_ry: 40.0",
+                "k_points: null",
+                "scf:",
+                "  scf_guess: ATOMIC",
+                "  eps_scf: 1.0e-6",
+                "  max_scf: 100",
+                "  outer_scf_max: 10",
+                "  ot_minimizer: CG",
+                "  ot_preconditioner: FULL_SINGLE_INVERSE",
+                "  energy_gap: 0.001",
+                "basis_potential: null",
+                "provenance:",
+                "  source: convergence",
+                "  workflow: standard_cp2k_convergence",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        load_cp2k_methodology_candidate,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="status 'candidate'",
+    ):
+        load_cp2k_methodology_candidate(
+            candidate_path
+        )
+
+
+def test_promote_cp2k_methodology_candidate(
+    tmp_path: Path,
+) -> None:
+    from nsdw.project.models import ProjectConfig
+    from nsdw.project.scaffold import create_project
+    from nsdw.project.workspace import (
+        load_project_workspace,
+    )
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        CP2KStandardConvergenceResult,
+        promote_cp2k_methodology_candidate,
+        write_cp2k_methodology_candidate,
+    )
+
+    project_root = tmp_path / "igzo-project"
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="IGZO defect study",
+            material="InGaZnO4",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+        ),
+    )
+
+    workflow_directory = (
+        project_root
+        / "workflows"
+        / "convergence"
+    )
+
+    cutoff_directory = (
+        workflow_directory / "cutoff"
+    )
+
+    relative_cutoff_directory = (
+        workflow_directory / "relative_cutoff"
+    )
+
+    cutoff_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    relative_cutoff_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        cutoff_directory
+        / "convergence-report.json"
+    ).write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    (
+        relative_cutoff_directory
+        / "convergence-report.json"
+    ).write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    result = CP2KStandardConvergenceResult(
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        cutoff_report=_report(
+            parameter=ConvergenceParameter.CUTOFF,
+            selected_candidate_label="560-Ry",
+        ),
+        relative_cutoff_report=_report(
+            parameter=(
+                ConvergenceParameter.RELATIVE_CUTOFF
+            ),
+            selected_candidate_label="40-Ry",
+        ),
+        converged_config=CP2KInputConfig(
+            project_name="igzo",
+            run_type="ENERGY",
+            cutoff_ry=560.0,
+            relative_cutoff_ry=40.0,
+            scf=CP2KSCFConfig(),
+            basis_potential=CP2KBasisPotentialConfig(
+                basis_set_file="BASIS_MOLOPT",
+                potential_file="GTH_POTENTIALS",
+                kinds=(),
+            ),
+        ),
+    )
+
+    candidate_path = (
+        write_cp2k_methodology_candidate(
+            result=result,
+            workflow_directory=workflow_directory,
+        )
+    )
+
+    workspace = promote_cp2k_methodology_candidate(
+        project_root=project_root,
+        candidate_path=candidate_path,
+    )
+
+    methodology = (
+        workspace.config.methodology.cp2k
+    )
+
+    assert methodology is not None
+    assert methodology.status == "validated"
+
+    assert methodology.cutoff_ry == 560.0
+    assert methodology.relative_cutoff_ry == 40.0
+
+    assert (
+        methodology.provenance.cutoff_report
+        == (
+            "workflows/convergence/cutoff/"
+            "convergence-report.json"
+        )
+    )
+
+    assert (
+        methodology.provenance.relative_cutoff_report
+        == (
+            "workflows/convergence/relative_cutoff/"
+            "convergence-report.json"
+        )
+    )
+
+    reloaded = load_project_workspace(
+        project_root
+    )
+
+    assert (
+        reloaded.config.methodology.cp2k
+        == methodology
+    )

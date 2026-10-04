@@ -9,7 +9,10 @@ import yaml
 
 from pydantic import ValidationError
 
-from nsdw.project.models import ProjectConfig
+from nsdw.project.models import (
+    CP2KProductionMethodology,
+    ProjectConfig,
+)
 
 PROJECT_SCHEMA_VERSION = 1
 
@@ -48,6 +51,66 @@ class ProjectWorkspace:
         """Return the enabled modelling components."""
 
         return tuple(self.config.components)
+
+
+def write_project_config(
+    root: str | Path,
+    config: ProjectConfig,
+) -> Path:
+    """Persist validated NSDW project metadata."""
+
+    root = Path(root).expanduser().resolve()
+
+    metadata_path = root / "project.yaml"
+
+    metadata_path.write_text(
+        yaml.safe_dump(
+            config.model_dump(mode="json"),
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    return metadata_path
+
+
+def update_cp2k_methodology(
+    root: str | Path,
+    methodology: CP2KProductionMethodology,
+) -> ProjectWorkspace:
+    """Persist the project's selected CP2K production methodology."""
+
+    workspace = load_project_workspace(root)
+
+    if "cp2k" not in workspace.config.components:
+        raise ProjectWorkspaceError(
+            "Cannot set CP2K methodology because the "
+            "CP2K component is not enabled for this project."
+        )
+
+    updated_methodology = (
+        workspace.config.methodology.model_copy(
+            update={
+                "cp2k": methodology,
+            }
+        )
+    )
+
+    updated_config = workspace.config.model_copy(
+        update={
+            "methodology": updated_methodology,
+        }
+    )
+
+    write_project_config(
+        workspace.root,
+        updated_config,
+    )
+
+    return ProjectWorkspace(
+        root=workspace.root,
+        config=updated_config,
+    )
 
 
 def load_project_workspace(

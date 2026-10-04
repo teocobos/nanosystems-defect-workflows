@@ -71,6 +71,8 @@ from nsdw.workflows.convergence.cp2k_generation import (
     generate_cp2k_convergence_study,
 )
 from nsdw.workflows.convergence.cp2k_workflow import (
+    load_cp2k_methodology_candidate,
+    promote_cp2k_methodology_candidate,
     run_and_report_cp2k_convergence_campaign,
 )
 from nsdw.workflows.convergence.models import (
@@ -112,6 +114,11 @@ project_app = typer.Typer(
     no_args_is_help=True,
 )
 
+methodology_app = typer.Typer(
+    help="Inspect and promote project modelling methodologies.",
+    no_args_is_help=True,
+)
+
 app.add_typer(
     structure_app,
     name="structure",
@@ -130,6 +137,11 @@ app.add_typer(
 app.add_typer(
     project_app,
     name="project",
+)
+
+app.add_typer(
+    methodology_app,
+    name="methodology",
 )
 
 console = Console()
@@ -288,6 +300,198 @@ def project_info() -> None:
         console.print(
             "[bold]Components:[/bold] none"
         )
+
+
+@methodology_app.command("show")
+def methodology_show(
+    candidate: bool = typer.Option(
+        False,
+        "--candidate",
+        help=(
+            "Show the current convergence methodology "
+            "candidate instead of the validated project methodology."
+        ),
+    ),
+) -> None:
+    """Show the project's CP2K methodology."""
+
+    try:
+        workspace = find_project_workspace(
+            Path.cwd(),
+        )
+
+        if candidate:
+            candidate_path = (
+                workspace.root
+                / "workflows"
+                / "convergence"
+                / "methodology-candidate.yaml"
+            )
+
+            methodology = (
+                load_cp2k_methodology_candidate(
+                    candidate_path
+                )
+            )
+
+            source = "candidate"
+
+        else:
+            methodology = (
+                workspace.config.methodology.cp2k
+            )
+
+            if methodology is None:
+                console.print(
+                    "[bold yellow]"
+                    "No validated CP2K methodology "
+                    "is stored for this project."
+                    "[/bold yellow]"
+                )
+                raise typer.Exit(code=1)
+
+            source = "validated"
+
+    except (
+        ProjectWorkspaceError,
+        FileNotFoundError,
+        ValueError,
+        ValidationError,
+    ) as exc:
+        console.print(
+            f"[bold red]Error:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"\n[bold]CP2K methodology ({source})[/bold]\n"
+    )
+
+    console.print(
+        f"Status:               "
+        f"{methodology.status}"
+    )
+
+    console.print(
+        f"Functional:           "
+        f"{methodology.functional.value}"
+    )
+
+    console.print(
+        f"Cutoff:               "
+        f"{methodology.cutoff_ry:g} Ry"
+    )
+
+    console.print(
+        f"Relative cutoff:      "
+        f"{methodology.relative_cutoff_ry:g} Ry"
+    )
+
+    console.print(
+        f"SCF tolerance:        "
+        f"{methodology.scf.eps_scf:g}"
+    )
+
+    console.print(
+        f"SCF max iterations:   "
+        f"{methodology.scf.max_scf}"
+    )
+
+    if methodology.basis_potential is not None:
+        console.print(
+            f"Basis file:           "
+            f"{methodology.basis_potential.basis_set_file}"
+        )
+
+        console.print(
+            f"Potential file:       "
+            f"{methodology.basis_potential.potential_file}"
+        )
+
+    console.print(
+        f"Provenance source:    "
+        f"{methodology.provenance.source}"
+    )
+
+    console.print(
+        f"Workflow:             "
+        f"{methodology.provenance.workflow}"
+    )
+
+
+@methodology_app.command("promote")
+def methodology_promote(
+    candidate_path: Path | None = typer.Option(
+        None,
+        "--candidate",
+        help=(
+            "Path to a methodology candidate YAML file. "
+            "Defaults to the current project's standard "
+            "convergence candidate."
+        ),
+    ),
+) -> None:
+    """Promote a reviewed methodology candidate into project metadata."""
+
+    try:
+        workspace = find_project_workspace(
+            Path.cwd(),
+        )
+
+        if candidate_path is None:
+            candidate_path = (
+                workspace.root
+                / "workflows"
+                / "convergence"
+                / "methodology-candidate.yaml"
+            )
+
+        promoted_workspace = (
+            promote_cp2k_methodology_candidate(
+                project_root=workspace.root,
+                candidate_path=candidate_path,
+            )
+        )
+
+    except (
+        ProjectWorkspaceError,
+        FileNotFoundError,
+        ValueError,
+        ValidationError,
+    ) as exc:
+        console.print(
+            f"[bold red]Error:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    methodology = (
+        promoted_workspace
+        .config
+        .methodology
+        .cp2k
+    )
+
+    console.print(
+        "\n[bold green]"
+        "CP2K methodology promoted"
+        "[/bold green]\n"
+    )
+
+    if methodology is not None:
+        console.print(
+            f"Cutoff:          "
+            f"{methodology.cutoff_ry:g} Ry"
+        )
+
+        console.print(
+            f"Relative cutoff: "
+            f"{methodology.relative_cutoff_ry:g} Ry"
+        )
+
+    console.print(
+        f"Project:         "
+        f"{promoted_workspace.root}"
+    )
 
 
 def _resolve_lattice_parameters(

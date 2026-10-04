@@ -105,7 +105,10 @@ def test_project_yaml_contains_resolved_configuration(
             "cp2k",
             "mace",
         ],
-    }
+        "methodology": {
+            "cp2k": None,
+    },
+}
 
 
 def test_create_project_allows_existing_empty_directory(

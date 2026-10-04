@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from nsdw.project.models import ProjectConfig
-
+from nsdw.project.workspace import write_project_config
 
 class ProjectScaffoldError(RuntimeError):
     """Raised when an NSDW project cannot be created safely."""
@@ -105,7 +105,7 @@ def create_project(
             / ".gitkeep"
         ).touch()
 
-    _write_project_config(
+    write_project_config(
         root=root,
         config=config,
     )
@@ -120,25 +120,6 @@ def create_project(
     )
 
     return root
-
-
-def _write_project_config(
-    root: Path,
-    config: ProjectConfig,
-) -> None:
-    """Write project.yaml using stable field ordering."""
-
-    destination = root / "project.yaml"
-
-    data = config.model_dump()
-
-    destination.write_text(
-        yaml.safe_dump(
-            data,
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
 
 
 def _write_readme(
