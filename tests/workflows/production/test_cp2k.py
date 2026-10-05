@@ -1,5 +1,7 @@
 import pytest
 
+from unittest.mock import patch
+
 from pymatgen.core import (
     Lattice,
     Structure,
@@ -27,11 +29,21 @@ from nsdw.project.scaffold import (
 from nsdw.project.workspace import (
     load_project_workspace,
 )
+from nsdw.execution import (
+    AiiDACp2kResources,
+    AiiDASubmission,
+)
+from nsdw.execution.models import (
+    ExecutionBackend,
+    ExecutionResult,
+    ExecutionState,
+)
 
 from nsdw.workflows.production.cp2k import (
     build_cp2k_production_config,
     build_cp2k_production_config_from_workspace,
     generate_cp2k_production_package,
+    submit_cp2k_production_aiida,
 )
 
 def _methodology(
@@ -324,3 +336,161 @@ def test_generate_cp2k_production_package_from_workspace(
         "COORD_FILE_NAME oxygen-neutral.xyz"
         in input_text
     )
+
+def test_submit_cp2k_production_aiida_uses_validated_methodology(
+    tmp_path,
+) -> None:
+    project_root = tmp_path / "oxide-aiida-project"
+
+    methodology = CP2KProductionMethodology(
+        status="validated",
+        functional=CP2KXCFunctional.PBE,
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        k_points=None,
+        scf=CP2KSCFConfig(
+            eps_scf=1.0e-7,
+            max_scf=150,
+        ),
+        basis_potential=CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="DZVP-MOLOPT-SR-GTH",
+                    potential="GTH-PBE-q6",
+                ),
+            ),
+        ),
+        provenance=CP2KMethodologyProvenance(
+            source="convergence",
+            workflow="standard_cp2k_convergence",
+        ),
+    )
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="oxide-aiida-project",
+            material="O",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+            methodology={
+                "cp2k": methodology,
+            },
+        ),
+    )
+
+    workspace = load_project_workspace(
+        project_root
+    )
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+        ],
+    )
+
+    recipe = CP2KProductionRecipe(
+        project_name="oxygen-aiida",
+        run_type="ENERGY",
+        charge=0,
+        multiplicity=1,
+    )
+
+    resources = AiiDACp2kResources(
+        num_machines=1,
+        num_mpiprocs_per_machine=4,
+        max_wallclock_seconds=600,
+        queue_name="debug",
+        account="project-test",
+        environment_variables={
+            "OMP_NUM_THREADS": "2",
+        },
+    )
+
+    fake_result = ExecutionResult(
+        calculation_id="oxygen-aiida",
+        backend=ExecutionBackend.AIIDA,
+        state=ExecutionState.CREATED,
+        process_id="123",
+        process_uuid=(
+            "550e8400-e29b-41d4-a716-446655440123"
+        ),
+        host="example-hpc",
+    )
+
+    fake_submission = AiiDASubmission(
+        process=object(),
+        result=fake_result,
+    )
+
+    with patch(
+        "nsdw.workflows.production.cp2k.submit_cp2k_aiida",
+        return_value=fake_submission,
+    ) as submit_mock:
+        submission = submit_cp2k_production_aiida(
+            workspace=workspace,
+            structure=structure,
+            recipe=recipe,
+            code_label="cp2k-test@cluster",
+            resources=resources,
+            profile="test-profile",
+            label="Production AiiDA test",
+            description="Production bridge test",
+        )
+
+    assert submission is fake_submission
+
+    submit_mock.assert_called_once()
+
+    call = submit_mock.call_args.kwargs
+
+    assert call["calculation_id"] == "oxygen-aiida"
+    assert call["code_label"] == "cp2k-test@cluster"
+    assert call["resources"] is resources
+    assert call["profile"] == "test-profile"
+    assert call["label"] == "Production AiiDA test"
+    assert call["description"] == "Production bridge test"
+
+    parameters = call["parameters"]
+
+    assert parameters["GLOBAL"] == {
+        "RUN_TYPE": "ENERGY",
+        "PRINT_LEVEL": "MEDIUM",
+    }
+
+    dft = parameters["FORCE_EVAL"]["DFT"]
+
+    assert dft["BASIS_SET_FILE_NAME"] == "BASIS_MOLOPT"
+    assert dft["POTENTIAL_FILE_NAME"] == "GTH_POTENTIALS"
+    assert dft["CHARGE"] == 0
+    assert dft["MULTIPLICITY"] == 1
+
+    assert dft["MGRID"] == {
+        "CUTOFF": 560.0,
+        "REL_CUTOFF": 40.0,
+    }
+
+    assert dft["SCF"]["EPS_SCF"] == 1.0e-7
+    assert dft["SCF"]["MAX_SCF"] == 150
+
+    assert (
+        parameters["FORCE_EVAL"]["SUBSYS"]["KIND"]
+        == [
+            {
+                "_": "O",
+                "ELEMENT": "O",
+                "BASIS_SET": "DZVP-MOLOPT-SR-GTH",
+                "POTENTIAL": "GTH-PBE-q6",
+            },
+        ]
+    )
+
+    ase_structure = call["structure"]
+
+    assert len(ase_structure) == 1
+    assert ase_structure.get_chemical_symbols() == ["O"]

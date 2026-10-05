@@ -43,6 +43,10 @@ from nsdw.calculators.cp2k.package import (
     CP2KPackageError,
     write_cp2k_package,
 )
+from nsdw.calculators.cp2k.aiida import (
+    CP2KAiiDAAdapterError,
+    build_aiida_cp2k_parameters,
+)
 
 __all__ = [
     "ParsedCP2KMultigrid",
@@ -74,4 +78,6 @@ __all__ = [
     "validate_cp2k_data_dir",
     "CP2KPackageError",
     "write_cp2k_package",
+    "CP2KAiiDAAdapterError",
+    "build_aiida_cp2k_parameters",
 ]

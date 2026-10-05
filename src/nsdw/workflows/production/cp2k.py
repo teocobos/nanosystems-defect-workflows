@@ -5,6 +5,7 @@ from pathlib import Path
 from pymatgen.core import Structure
 
 from nsdw.calculators.cp2k import (
+    build_aiida_cp2k_parameters,
     write_cp2k_package,
 )
 from nsdw.calculators.cp2k.generation_models import (
@@ -18,6 +19,11 @@ from nsdw.workflows.production.models import (
 )
 from nsdw.project.workspace import (
     ProjectWorkspace,
+)
+from nsdw.execution import (
+    AiiDACp2kResources,
+    AiiDASubmission,
+    submit_cp2k_aiida,
 )
 
 
@@ -96,4 +102,44 @@ def generate_cp2k_production_package(
         structure=structure,
         config=config,
         output_directory=output_directory,
+    )
+
+def submit_cp2k_production_aiida(
+    *,
+    workspace: ProjectWorkspace,
+    structure: Structure,
+    recipe: CP2KProductionRecipe,
+    code_label: str,
+    resources: AiiDACp2kResources,
+    profile: str | None = None,
+    label: str | None = None,
+    description: str | None = None,
+) -> AiiDASubmission:
+    """Submit a validated CP2K production calculation through AiiDA.
+
+    NSDW owns the validated scientific configuration. The configuration
+    is adapted into the structured parameters expected by aiida-cp2k,
+    while AiiDA owns execution, transport, scheduling, parsing, and
+    provenance.
+    """
+
+    config = build_cp2k_production_config_from_workspace(
+        workspace=workspace,
+        recipe=recipe,
+    )
+
+    parameters = build_aiida_cp2k_parameters(
+        config=config,
+        structure=structure,
+    )
+
+    return submit_cp2k_aiida(
+        calculation_id=recipe.project_name,
+        code_label=code_label,
+        parameters=parameters,
+        structure=structure.to_ase_atoms(),
+        resources=resources,
+        profile=profile,
+        label=label,
+        description=description,
     )

@@ -55,6 +55,11 @@ from nsdw.workflows import (
     run_cp2k_single_point,
 )
 from nsdw.execution.monitor import SlurmMonitorConfig
+from nsdw.execution import (
+    AiiDACp2kResources,
+    AiiDAExecutionError,
+    AiiDAUnavailableError,
+)
 from nsdw.workflows.hpc_single_point import (
     HPCSinglePointWorkflowError,
     run_cp2k_single_point_archer2,
@@ -90,6 +95,7 @@ from nsdw.calculators.cp2k import (
 )
 from nsdw.workflows.production.cp2k import (
     generate_cp2k_production_package,
+    submit_cp2k_production_aiida,
 )
 from nsdw.workflows.production.models import (
     CP2KProductionRecipe,
@@ -1655,6 +1661,181 @@ def workflow_production_generate(
             console.print(
                 f"[yellow]⚠[/yellow] {warning}"
             )
+
+
+
+@workflow_app.command("production-submit")
+def workflow_production_submit(
+    structure_file: Path = typer.Argument(
+        ...,
+        help="Input structure file.",
+    ),
+    name: str = typer.Option(
+        ...,
+        "--name",
+        "-n",
+        help="Production calculation name.",
+    ),
+    code: str = typer.Option(
+        ...,
+        "--code",
+        help=(
+            "AiiDA CP2K code label, for example "
+            "'cp2k-lumi-c@lumi-c'."
+        ),
+    ),
+    charge: int = typer.Option(
+        0,
+        "--charge",
+        help="Total calculation charge.",
+    ),
+    multiplicity: int = typer.Option(
+        1,
+        "--multiplicity",
+        help="Spin multiplicity.",
+        min=1,
+    ),
+    run_type: str = typer.Option(
+        "ENERGY_FORCE",
+        "--run-type",
+        help="CP2K run type.",
+    ),
+    profile: str | None = typer.Option(
+        None,
+        "--profile",
+        help="AiiDA profile. Uses the default profile when omitted.",
+    ),
+    queue: str | None = typer.Option(
+        None,
+        "--queue",
+        help="Scheduler queue/partition.",
+    ),
+    account: str | None = typer.Option(
+        None,
+        "--account",
+        help="Scheduler project/account.",
+    ),
+    machines: int = typer.Option(
+        1,
+        "--machines",
+        min=1,
+        help="Number of compute nodes.",
+    ),
+    mpi_per_machine: int = typer.Option(
+        1,
+        "--mpi-per-machine",
+        min=1,
+        help="MPI processes per compute node.",
+    ),
+    omp_threads: int = typer.Option(
+        1,
+        "--omp-threads",
+        min=1,
+        help="OpenMP threads per MPI process.",
+    ),
+    walltime: int = typer.Option(
+        600,
+        "--walltime",
+        min=1,
+        help="Maximum walltime in seconds.",
+    ),
+) -> None:
+    """Submit a validated CP2K production calculation through AiiDA."""
+
+    try:
+        workspace = find_project_workspace(
+            Path.cwd(),
+        )
+
+        structure, parser_warnings = load_structure(
+            structure_file,
+        )
+
+        recipe = CP2KProductionRecipe(
+            project_name=name,
+            run_type=run_type,
+            charge=charge,
+            multiplicity=multiplicity,
+        )
+
+        resources = AiiDACp2kResources(
+            num_machines=machines,
+            num_mpiprocs_per_machine=mpi_per_machine,
+            max_wallclock_seconds=walltime,
+            queue_name=queue,
+            account=account,
+            environment_variables={
+                "OMP_NUM_THREADS": str(omp_threads),
+            },
+        )
+
+        submission = submit_cp2k_production_aiida(
+            workspace=workspace,
+            structure=structure,
+            recipe=recipe,
+            code_label=code,
+            resources=resources,
+            profile=profile,
+            label=name,
+            description=(
+                "Submitted through the NSDW production workflow."
+            ),
+        )
+
+    except (
+        ProjectWorkspaceError,
+        StructureParseError,
+        FileNotFoundError,
+        ValueError,
+        ValidationError,
+        AiiDAUnavailableError,
+        AiiDAExecutionError,
+    ) as exc:
+        console.print(
+            f"[bold red]Error:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    result = submission.result
+
+    console.print(
+        "\n[bold green]"
+        "CP2K production calculation submitted"
+        "[/bold green]\n"
+    )
+
+    console.print(
+        f"Calculation:      {result.calculation_id}"
+    )
+    console.print(
+        f"Backend:          {result.backend.value}"
+    )
+    console.print(
+        f"State:            {result.state.value}"
+    )
+    console.print(
+        f"AiiDA PK:         {result.process_id}"
+    )
+    console.print(
+        f"AiiDA UUID:       {result.process_uuid}"
+    )
+    console.print(
+        f"Host:             {result.host}"
+    )
+    console.print(
+        f"Code:             {code}"
+    )
+
+    if parser_warnings:
+        console.print(
+            "\n[bold yellow]Parser warnings[/bold yellow]"
+        )
+
+        for warning in parser_warnings:
+            console.print(
+                f"[yellow]⚠[/yellow] {warning}"
+            )
+
 
 # ============================================================================
 # Single-point workflow

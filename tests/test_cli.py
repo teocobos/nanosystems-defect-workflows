@@ -1313,3 +1313,149 @@ def test_workflow_production_generate_requires_validated_methodology(
         "No validated CP2K methodology"
         in result.stdout
     )
+
+def test_workflow_production_submit_aiida(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "oxide-project"
+
+    methodology = CP2KProductionMethodology(
+        status="validated",
+        functional=CP2KXCFunctional.PBE,
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        k_points=None,
+        scf=CP2KSCFConfig(
+            eps_scf=1.0e-7,
+            max_scf=150,
+        ),
+        basis_potential=CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="DZVP-MOLOPT-SR-GTH",
+                    potential="GTH-PBE-q6",
+                ),
+            ),
+        ),
+        provenance=CP2KMethodologyProvenance(
+            source="convergence",
+            workflow="standard_cp2k_convergence",
+        ),
+    )
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="oxide-project",
+            material="O",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+            methodology={
+                "cp2k": methodology,
+            },
+        ),
+    )
+
+    structure_file = (
+        project_root
+        / "structures"
+        / "validated"
+        / "oxygen.cif"
+    )
+
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[
+            [0.0, 0.0, 0.0],
+        ],
+    )
+
+    structure.to(
+        filename=structure_file,
+    )
+
+    submission = Mock()
+
+    submission.result.calculation_id = "oxygen-production"
+    submission.result.backend.value = "aiida"
+    submission.result.state.value = "submitted"
+    submission.result.process_id = "31"
+    submission.result.process_uuid = (
+        "65ef8a70-4b26-476d-bdb6-92c4b26b3075"
+    )
+    submission.result.host = "efp.lumi.csc.fi"
+
+    monkeypatch.chdir(project_root)
+
+    with patch(
+        "nsdw.cli.submit_cp2k_production_aiida",
+        return_value=submission,
+    ) as submit_mock:
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "production-submit",
+                str(structure_file),
+                "--name",
+                "oxygen-production",
+                "--code",
+                "cp2k-lumi-c@lumi-c",
+                "--profile",
+                "nsdw-dev",
+                "--queue",
+                "debug",
+                "--account",
+                "project-test",
+                "--machines",
+                "1",
+                "--mpi-per-machine",
+                "2",
+                "--omp-threads",
+                "4",
+                "--walltime",
+                "900",
+                "--run-type",
+                "ENERGY",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    assert (
+        "CP2K production calculation submitted"
+        in result.stdout
+    )
+    assert "oxygen-production" in result.stdout
+    assert "aiida" in result.stdout
+    assert "31" in result.stdout
+    assert "efp.lumi.csc.fi" in result.stdout
+
+    submit_mock.assert_called_once()
+
+    call = submit_mock.call_args.kwargs
+
+    assert call["code_label"] == "cp2k-lumi-c@lumi-c"
+    assert call["profile"] == "nsdw-dev"
+
+    assert call["recipe"].project_name == "oxygen-production"
+    assert call["recipe"].run_type == "ENERGY"
+    assert call["recipe"].charge == 0
+    assert call["recipe"].multiplicity == 1
+
+    resources = call["resources"]
+
+    assert resources.num_machines == 1
+    assert resources.num_mpiprocs_per_machine == 2
+    assert resources.max_wallclock_seconds == 900
+    assert resources.queue_name == "debug"
+    assert resources.account == "project-test"
+
+    assert resources.environment_variables == {
+        "OMP_NUM_THREADS": "4",
+    }

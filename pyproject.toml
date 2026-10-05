@@ -34,7 +34,9 @@ reporting = [
 ]
 
 aiida = [
-    "aiida-core>=2.9.2,<3.0"
+    "aiida-core>=2.9.2,<3.0",
+    "aiida-cp2k>=2.1.1,<3.0",
+    "aiida-pseudo>=1.10,<2.0"
 ]
 
 [project.scripts]
