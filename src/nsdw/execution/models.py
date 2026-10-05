@@ -29,6 +29,7 @@ class ExecutionBackend(StrEnum):
 
     LOCAL = "local"
     SLURM = "slurm"
+    AIIDA = "aiida"
 
 
 class ExecutionRequest(BaseModel):
@@ -103,7 +104,9 @@ class ExecutionResult(BaseModel):
 
     return_code: int | None = None
     job_id: str | None = None
-
+    process_id: str | None = None
+    process_uuid: str | None = None
+    
     host: str | None = None
     command: tuple[str, ...] = ()
 

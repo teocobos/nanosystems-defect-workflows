@@ -33,6 +33,10 @@ reporting = [
     "matplotlib>=3.8"
 ]
 
+aiida = [
+    "aiida-core>=2.9.2,<3.0"
+]
+
 [project.scripts]
 nsdw = "nsdw.cli:app"
 

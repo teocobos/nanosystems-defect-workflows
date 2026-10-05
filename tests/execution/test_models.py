@@ -131,3 +131,37 @@ def test_execution_models_are_immutable(
         ValidationError
     ):
         request.calculation_id = "changed"
+
+
+def test_execution_backend_supports_aiida() -> None:
+    from nsdw.execution.models import ExecutionBackend
+
+    assert ExecutionBackend.AIIDA.value == "aiida"
+
+
+def test_execution_result_serialises_aiida_backend() -> None:
+    from nsdw.execution.models import (
+        ExecutionBackend,
+        ExecutionResult,
+        ExecutionState,
+    )
+
+    result = ExecutionResult(
+        calculation_id="aiida-test",
+        backend=ExecutionBackend.AIIDA,
+        state=ExecutionState.SUBMITTED,
+        job_id="987654",
+        process_id="12345",
+        process_uuid="550e8400-e29b-41d4-a716-446655440000",
+    )
+
+    data = result.model_dump(mode="json")
+
+    assert data["backend"] == "aiida"
+    assert data["state"] == "submitted"
+    assert data["job_id"] == "987654"
+    assert data["process_id"] == "12345"
+    assert (
+        data["process_uuid"]
+        == "550e8400-e29b-41d4-a716-446655440000"
+    )
