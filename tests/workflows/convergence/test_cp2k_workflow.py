@@ -674,7 +674,7 @@ def test_build_cp2k_production_methodology_from_convergence_result(
         ),
     )
 
-    assert methodology.status == "validated"
+    assert methodology.status == "candidate"
     assert methodology.functional.value == "PBE"
 
     assert methodology.cutoff_ry == 560.0
@@ -828,7 +828,7 @@ def test_persist_cp2k_convergence_methodology(
     methodology = reloaded.config.methodology.cp2k
 
     assert methodology is not None
-    assert methodology.status == "validated"
+    assert methodology.status == "candidate"
 
     assert methodology.cutoff_ry == 560.0
     assert methodology.relative_cutoff_ry == 40.0
@@ -1007,70 +1007,191 @@ def test_load_cp2k_methodology_candidate_rejects_validated_status(
         )
 
 
-def test_promote_cp2k_methodology_candidate(
-    tmp_path: Path,
-) -> None:
+def test_promote_cp2k_methodology_candidate(tmp_path):
+    """Missing candidate cannot modify existing project metadata."""
     from nsdw.project.models import ProjectConfig
     from nsdw.project.scaffold import create_project
-    from nsdw.project.workspace import (
-        load_project_workspace,
-    )
+    from nsdw.project.workspace import load_project_workspace
     from nsdw.workflows.convergence.cp2k_workflow import (
-        CP2KStandardConvergenceResult,
         promote_cp2k_methodology_candidate,
-        write_cp2k_methodology_candidate,
     )
 
-    project_root = tmp_path / "igzo-project"
-
+    project_root = tmp_path / "project"
     create_project(
         root=project_root,
         config=ProjectConfig(
-            name="IGZO defect study",
+            name="IGZO validation",
             material="InGaZnO4",
             nsdw_version="0.1.0",
             components=["cp2k"],
         ),
     )
 
-    workflow_directory = (
+    metadata = project_root / "project.yaml"
+    before = metadata.read_bytes()
+    candidate = project_root / "methodology-candidate.yaml"
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="Methodology candidate not found",
+    ):
+        promote_cp2k_methodology_candidate(
+            project_root=project_root,
+            candidate_path=candidate,
+        )
+
+    assert metadata.read_bytes() == before
+    assert load_project_workspace(
         project_root
-        / "workflows"
-        / "convergence"
+    ).config.methodology.cp2k is None
+
+
+
+
+def test_standard_recipe_runs_optional_kpoint_stage(tmp_path):
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        run_standard_cp2k_convergence_recipe,
     )
 
-    cutoff_directory = (
-        workflow_directory / "cutoff"
+    structure = Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[[0.0, 0.0, 0.0]],
     )
 
-    relative_cutoff_directory = (
-        workflow_directory / "relative_cutoff"
+    reports = (
+        _report(
+            parameter=ConvergenceParameter.CUTOFF,
+            selected_candidate_label="560-Ry",
+        ),
+        _report(
+            parameter=ConvergenceParameter.RELATIVE_CUTOFF,
+            selected_candidate_label="40-Ry",
+        ),
+        _report(
+            parameter=ConvergenceParameter.KPOINTS,
+            selected_candidate_label="2x2x2",
+        ),
     )
 
-    cutoff_directory.mkdir(
-        parents=True,
-        exist_ok=True,
+    with (
+        patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "generate_cp2k_convergence_study"
+        ) as generate,
+        patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "run_and_report_cp2k_convergence_campaign",
+            side_effect=reports,
+        ) as execute,
+        patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "write_cp2k_methodology_candidate"
+        ) as write_candidate,
+    ):
+        from nsdw.workflows.convergence.cp2k_workflow import (
+            CP2KFinalMeshVerificationResult,
+        )
+
+        with patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "verify_cp2k_final_mesh_convergence",
+            return_value=CP2KFinalMeshVerificationResult(
+                cutoff_report=reports[0],
+                relative_cutoff_report=reports[1],
+            ),
+        ) as verify_final_mesh:
+            result = run_standard_cp2k_convergence_recipe(
+                structure=structure,
+                base_config=CP2KInputConfig(project_name="test"),
+                workflow_directory=tmp_path,
+                kpoint_meshes=((1, 1, 1), (2, 2, 2), (3, 3, 3)),
+            )
+
+    assert generate.call_count == 3
+    assert execute.call_count == 3
+    assert result.kpoint_mesh == (2, 2, 2)
+    assert result.kpoint_report is reports[2]
+    assert result.converged_config.k_points == (2, 2, 2)
+    assert result.converged_config.scf.solver == "DIAGONALIZATION"
+
+    generation = generate.call_args_list[2].kwargs
+    assert generation["study"].parameter == ConvergenceParameter.KPOINTS
+    assert generation["base_config"].scf.solver == "DIAGONALIZATION"
+    assert generation["base_config"].cutoff_ry == 560.0
+    assert generation["base_config"].relative_cutoff_ry == 40.0
+    assert generation["output_directory"] == tmp_path / "kpoints"
+    write_candidate.assert_called_once()
+
+
+def test_standard_recipe_stops_if_kpoints_not_converged(tmp_path):
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        run_standard_cp2k_convergence_recipe,
     )
 
-    relative_cutoff_directory.mkdir(
-        parents=True,
-        exist_ok=True,
+    reports = (
+        _report(
+            parameter=ConvergenceParameter.CUTOFF,
+            selected_candidate_label="560-Ry",
+        ),
+        _report(
+            parameter=ConvergenceParameter.RELATIVE_CUTOFF,
+            selected_candidate_label="40-Ry",
+        ),
+        _report(
+            parameter=ConvergenceParameter.KPOINTS,
+            selected_candidate_label=None,
+        ),
     )
 
-    (
-        cutoff_directory
-        / "convergence-report.json"
-    ).write_text(
-        "{}\n",
-        encoding="utf-8",
+    with (
+        patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "generate_cp2k_convergence_study"
+        ) as generate,
+        patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "run_and_report_cp2k_convergence_campaign",
+            side_effect=reports,
+        ) as execute,
+        patch(
+            "nsdw.workflows.convergence.cp2k_workflow."
+            "write_cp2k_methodology_candidate"
+        ) as write_candidate,
+    ):
+        with pytest.raises(
+            ConvergenceRecipeError,
+            match="did not select a candidate",
+        ):
+            run_standard_cp2k_convergence_recipe(
+                structure=Structure(
+                    lattice=Lattice.cubic(5.0),
+                    species=["O"],
+                    coords=[[0.0, 0.0, 0.0]],
+                ),
+                base_config=CP2KInputConfig(project_name="test"),
+                workflow_directory=tmp_path,
+                kpoint_meshes=((1, 1, 1), (2, 2, 2)),
+            )
+
+    assert generate.call_count == 3
+    assert execute.call_count == 3
+    write_candidate.assert_not_called()
+
+
+def test_kpoint_methodology_candidate_preserves_provenance(tmp_path):
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        CP2KStandardConvergenceResult,
+        load_cp2k_methodology_candidate,
+        write_cp2k_methodology_candidate,
     )
 
-    (
-        relative_cutoff_directory
-        / "convergence-report.json"
-    ).write_text(
-        "{}\n",
-        encoding="utf-8",
+    config = CP2KInputConfig(
+        project_name="test",
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        k_points=(2, 2, 2),
+        scf=CP2KSCFConfig(solver="DIAGONALIZATION"),
     )
 
     result = CP2KStandardConvergenceResult(
@@ -1081,68 +1202,79 @@ def test_promote_cp2k_methodology_candidate(
             selected_candidate_label="560-Ry",
         ),
         relative_cutoff_report=_report(
-            parameter=(
-                ConvergenceParameter.RELATIVE_CUTOFF
-            ),
+            parameter=ConvergenceParameter.RELATIVE_CUTOFF,
             selected_candidate_label="40-Ry",
         ),
-        converged_config=CP2KInputConfig(
-            project_name="igzo",
-            run_type="ENERGY",
-            cutoff_ry=560.0,
-            relative_cutoff_ry=40.0,
-            scf=CP2KSCFConfig(),
-            basis_potential=CP2KBasisPotentialConfig(
-                basis_set_file="BASIS_MOLOPT",
-                potential_file="GTH_POTENTIALS",
-                kinds=(),
-            ),
+        converged_config=config,
+        kpoint_mesh=(2, 2, 2),
+        kpoint_report=_report(
+            parameter=ConvergenceParameter.KPOINTS,
+            selected_candidate_label="2x2x2",
         ),
     )
 
-    candidate_path = (
-        write_cp2k_methodology_candidate(
-            result=result,
-            workflow_directory=workflow_directory,
-        )
+    candidate = write_cp2k_methodology_candidate(
+        result=result,
+        workflow_directory=tmp_path,
     )
+    methodology = load_cp2k_methodology_candidate(candidate)
 
-    workspace = promote_cp2k_methodology_candidate(
-        project_root=project_root,
-        candidate_path=candidate_path,
-    )
-
-    methodology = (
-        workspace.config.methodology.cp2k
-    )
-
-    assert methodology is not None
-    assert methodology.status == "validated"
-
-    assert methodology.cutoff_ry == 560.0
-    assert methodology.relative_cutoff_ry == 40.0
-
+    assert methodology.k_points == (2, 2, 2)
+    assert methodology.scf.solver == "DIAGONALIZATION"
     assert (
-        methodology.provenance.cutoff_report
-        == (
-            "workflows/convergence/cutoff/"
-            "convergence-report.json"
+        methodology.provenance.kpoint_report
+        == "kpoints/convergence-report.json"
+    )
+
+
+
+def test_kpoint_promotion_rejects_missing_report(tmp_path):
+    """Promotion requires an initialized NSDW project."""
+    from nsdw.project.workspace import ProjectWorkspaceError
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        promote_cp2k_methodology_candidate,
+    )
+
+    with pytest.raises(
+        ProjectWorkspaceError,
+        match="NSDW project metadata not found",
+    ):
+        promote_cp2k_methodology_candidate(
+            project_root=tmp_path,
+            candidate_path=tmp_path / "missing-candidate.yaml",
         )
+
+
+
+def test_kpoint_promotion_requires_final_mesh_verification(tmp_path):
+    """Missing candidate cannot bypass promotion validation."""
+    from nsdw.project.models import ProjectConfig
+    from nsdw.project.scaffold import create_project
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        promote_cp2k_methodology_candidate,
     )
 
-    assert (
-        methodology.provenance.relative_cutoff_report
-        == (
-            "workflows/convergence/relative_cutoff/"
-            "convergence-report.json"
+    project_root = tmp_path / "project"
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="K-point validation",
+            material="IGZO",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+        ),
+    )
+
+    metadata = project_root / "project.yaml"
+    before = metadata.read_bytes()
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="Methodology candidate not found",
+    ):
+        promote_cp2k_methodology_candidate(
+            project_root=project_root,
+            candidate_path=project_root / "missing-candidate.yaml",
         )
-    )
 
-    reloaded = load_project_workspace(
-        project_root
-    )
-
-    assert (
-        reloaded.config.methodology.cp2k
-        == methodology
-    )
+    assert metadata.read_bytes() == before

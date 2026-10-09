@@ -266,3 +266,37 @@ def test_parse_real_igzo_cp2k_output():
     assert result.normal_termination is True
 
     assert result.warnings == ()
+
+
+def test_final_scf_failure_overrides_earlier_success():
+    from nsdw.calculators.cp2k.parser import parse_cp2k_text
+    from nsdw.calculators.cp2k.models import CP2KSCFStatus
+
+    output = """
+ CP2K| version string: CP2K version 2025.1
+ SCF run converged in 8 steps
+ SCF run NOT converged
+ PROGRAM ENDED AT
+"""
+
+    parsed = parse_cp2k_text(output)
+
+    assert parsed.scf.status == CP2KSCFStatus.NOT_CONVERGED
+    assert parsed.scf.iterations is None
+
+
+def test_final_scf_success_overrides_earlier_failure():
+    from nsdw.calculators.cp2k.parser import parse_cp2k_text
+    from nsdw.calculators.cp2k.models import CP2KSCFStatus
+
+    output = """
+ CP2K| version string: CP2K version 2025.1
+ SCF run NOT converged
+ SCF run converged in 12 steps
+ PROGRAM ENDED AT
+"""
+
+    parsed = parse_cp2k_text(output)
+
+    assert parsed.scf.status == CP2KSCFStatus.CONVERGED
+    assert parsed.scf.iterations == 12

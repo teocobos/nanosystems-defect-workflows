@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
 
 
 class CP2KRunType(StrEnum):
@@ -159,6 +160,14 @@ class ParsedCP2KInput(BaseModel):
     )
 
     k_points: tuple[int, int, int] | None = None
+    scf_solver: Literal["OT", "DIAGONALIZATION"] | None = None
+
+    scf_guess: str | None = None
+    max_scf: int | None = Field(default=None, gt=0)
+    outer_scf_max: int | None = Field(default=None, gt=0)
+    ot_minimizer: str | None = None
+    ot_preconditioner: str | None = None
+    energy_gap: float | None = Field(default=None, gt=0)
 
     kinds: tuple[ParsedCP2KKind, ...] = ()
 

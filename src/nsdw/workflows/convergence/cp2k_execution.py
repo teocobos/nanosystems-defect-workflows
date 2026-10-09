@@ -96,7 +96,7 @@ def run_cp2k_convergence_campaign(
 def collect_existing_cp2k_convergence_results(
     *,
     campaign_directory: str | Path,
-    output_file: str | Path = "calculation.out",
+    output_file: str | Path | None = None,
 ) -> tuple[NSDWResult, ...]:
     """Collect completed CP2K convergence results without executing CP2K."""
 
@@ -137,7 +137,11 @@ def collect_existing_cp2k_convergence_results(
             f"CP2K convergence campaign: {structure_path}"
         ) from exc
 
-    output_file = Path(output_file)
+    output_file = (
+        Path(output_file)
+        if output_file is not None
+        else None
+    )
 
     results: list[NSDWResult] = []
 
@@ -150,10 +154,30 @@ def collect_existing_cp2k_convergence_results(
             working_directory / candidate.input_file
         )
 
+        if output_file is not None:
+            candidate_output_file = output_file
+        else:
+            derived_output = Path(
+                candidate.input_file
+            ).with_suffix(".out")
+
+            legacy_output = Path("calculation.out")
+
+            if (
+                working_directory / derived_output
+            ).is_file():
+                candidate_output_file = derived_output
+            elif (
+                working_directory / legacy_output
+            ).is_file():
+                candidate_output_file = legacy_output
+            else:
+                candidate_output_file = derived_output
+
         candidate_output_path = (
-            output_file
-            if output_file.is_absolute()
-            else working_directory / output_file
+            candidate_output_file
+            if candidate_output_file.is_absolute()
+            else working_directory / candidate_output_file
         )
 
         if not input_path.is_file():

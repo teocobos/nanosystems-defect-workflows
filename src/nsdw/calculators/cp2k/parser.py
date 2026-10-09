@@ -223,13 +223,26 @@ def parse_cp2k_text(text: str) -> ParsedCP2KResult:
         else None
     )
 
-    if converged_match:
+    # The final SCF outcome determines convergence.
+    # Earlier successful SCF cycles must not mask a later failure.
+    final_success = (
+        converged_match.start()
+        if converged_match is not None
+        else -1
+    )
+    final_failure = (
+        not_converged_match.start()
+        if not_converged_match is not None
+        else -1
+    )
+
+    if final_success > final_failure:
         scf_status = CP2KSCFStatus.CONVERGED
         scf_iterations = int(
             converged_match.group(1)
         )
 
-    elif not_converged_match:
+    elif final_failure >= 0:
         scf_status = CP2KSCFStatus.NOT_CONVERGED
         scf_iterations = None
 

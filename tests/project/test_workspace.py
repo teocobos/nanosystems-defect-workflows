@@ -446,7 +446,7 @@ def test_update_cp2k_methodology_persists_configuration(
     )
 
     methodology = CP2KProductionMethodology(
-        status="validated",
+        status="candidate",
         functional=CP2KXCFunctional.PBE,
         cutoff_ry=600.0,
         relative_cutoff_ry=60.0,
@@ -489,7 +489,7 @@ def test_update_cp2k_methodology_persists_configuration(
     )
 
     assert persisted_methodology is not None
-    assert persisted_methodology.status == "validated"
+    assert persisted_methodology.status == "candidate"
     assert persisted_methodology.functional.value == "PBE"
     assert persisted_methodology.cutoff_ry == 600.0
     assert persisted_methodology.relative_cutoff_ry == 60.0
@@ -524,7 +524,7 @@ def test_update_cp2k_methodology_requires_cp2k_component(
     )
 
     methodology = CP2KProductionMethodology(
-        status="validated",
+        status="candidate",
         functional=CP2KXCFunctional.PBE,
         cutoff_ry=600.0,
         relative_cutoff_ry=60.0,

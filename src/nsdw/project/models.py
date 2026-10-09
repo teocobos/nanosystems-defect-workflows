@@ -51,6 +51,10 @@ class CP2KMethodologyProvenance(BaseModel):
 
     relative_cutoff_report: str | None = None
 
+    kpoint_report: str | None = None
+    final_cutoff_verification_report: str | None = None
+    final_relative_cutoff_verification_report: str | None = None
+
 
 class CP2KProductionMethodology(BaseModel):
     """Persistent scientific CP2K methodology for production work."""
@@ -60,7 +64,7 @@ class CP2KProductionMethodology(BaseModel):
         frozen=True,
     )
 
-    status: MethodologyStatus = "validated"
+    status: MethodologyStatus = "candidate"
 
     functional: CP2KXCFunctional
 

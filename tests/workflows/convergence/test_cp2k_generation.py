@@ -230,7 +230,13 @@ def test_generate_kpoint_study(
 
     packages = generate_cp2k_convergence_study(
         structure=_structure(),
-        base_config=_base_config(),
+        base_config=_base_config().model_copy(
+            update={
+                "scf": _base_config().scf.model_copy(
+                    update={"solver": "DIAGONALIZATION"}
+                )
+            }
+        ),
         study=study,
         output_directory=output_directory,
     )

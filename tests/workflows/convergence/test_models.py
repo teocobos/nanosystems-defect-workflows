@@ -471,3 +471,81 @@ def test_kpoints_study_rejects_string_candidate_value():
                 ),
             ],
         )
+
+
+def test_kpoints_study_rejects_zero_mesh_dimension():
+    with pytest.raises(ValidationError, match="must be positive"):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.KPOINTS,
+            candidates=[
+                ConvergenceCandidate(label="gamma", order=0, value=(1, 1, 1)),
+                ConvergenceCandidate(label="invalid", order=1, value=(2, 0, 2)),
+            ],
+        )
+
+
+def test_kpoints_study_rejects_negative_mesh_dimension():
+    with pytest.raises(ValidationError, match="must be positive"):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.KPOINTS,
+            candidates=[
+                ConvergenceCandidate(label="gamma", order=0, value=(1, 1, 1)),
+                ConvergenceCandidate(label="invalid", order=1, value=(-2, 2, 2)),
+            ],
+        )
+
+
+def test_kpoints_study_rejects_duplicate_mesh():
+    with pytest.raises(ValidationError, match="meshes must be unique"):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.KPOINTS,
+            candidates=[
+                ConvergenceCandidate(label="first", order=0, value=(2, 2, 2)),
+                ConvergenceCandidate(label="second", order=1, value=(2, 2, 2)),
+            ],
+        )
+
+
+def test_kpoints_study_rejects_decreasing_mesh_product():
+    with pytest.raises(ValidationError, match="strictly increasing mesh products"):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.KPOINTS,
+            candidates=[
+                ConvergenceCandidate(label="dense", order=0, value=(3, 3, 3)),
+                ConvergenceCandidate(label="coarse", order=1, value=(2, 2, 2)),
+            ],
+        )
+
+
+def test_kpoints_study_rejects_equal_mesh_products():
+    with pytest.raises(ValidationError, match="strictly increasing mesh products"):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.KPOINTS,
+            candidates=[
+                ConvergenceCandidate(label="first", order=0, value=(4, 2, 1)),
+                ConvergenceCandidate(label="second", order=1, value=(2, 2, 2)),
+            ],
+        )
+
+
+def test_kpoints_study_accepts_anisotropic_increasing_meshes():
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.KPOINTS,
+        candidates=[
+            ConvergenceCandidate(label="2x2x1", order=0, value=(2, 2, 1)),
+            ConvergenceCandidate(label="3x3x1", order=1, value=(3, 3, 1)),
+            ConvergenceCandidate(label="4x4x1", order=2, value=(4, 4, 1)),
+        ],
+    )
+    assert len(study.candidates) == 3
+
+
+def test_study_rejects_duplicate_candidate_labels():
+    with pytest.raises(ValidationError, match="labels must be unique"):
+        ConvergenceStudyDefinition(
+            parameter=ConvergenceParameter.KPOINTS,
+            candidates=[
+                ConvergenceCandidate(label="same", order=0, value=(1, 1, 1)),
+                ConvergenceCandidate(label="same", order=1, value=(2, 2, 2)),
+            ],
+        )

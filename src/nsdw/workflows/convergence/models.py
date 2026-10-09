@@ -116,6 +116,16 @@ class ConvergenceStudyDefinition(BaseModel):
             raise ValueError(
                 "Convergence candidate orders must be unique."
             )
+        labels = [
+            candidate.label
+            for candidate in self.candidates
+        ]
+
+        if len(set(labels)) != len(labels):
+            raise ValueError(
+                "Convergence candidate labels must be unique."
+            )
+
         supplied_values = [
             candidate.value
             for candidate in self.candidates
@@ -162,7 +172,7 @@ class ConvergenceStudyDefinition(BaseModel):
                     isinstance(value, tuple)
                     and len(value) == 3
                     and all(
-                        isinstance(component, int)
+                        type(component) is int
                         for component in value
                     )
                     for value in supplied_values
@@ -170,5 +180,35 @@ class ConvergenceStudyDefinition(BaseModel):
                     raise ValueError(
                         "KPOINTS candidates must use "
                         "three-integer meshes."
+                    )
+
+                if not all(
+                    all(component > 0 for component in value)
+                    for value in supplied_values
+                ):
+                    raise ValueError(
+                        "KPOINTS mesh dimensions must be positive."
+                    )
+
+                if len(set(supplied_values)) != len(supplied_values):
+                    raise ValueError(
+                        "KPOINTS candidate meshes must be unique."
+                    )
+
+                mesh_sizes = [
+                    value[0] * value[1] * value[2]
+                    for value in supplied_values
+                ]
+
+                if any(
+                    next_size <= current_size
+                    for current_size, next_size in zip(
+                        mesh_sizes,
+                        mesh_sizes[1:],
+                    )
+                ):
+                    raise ValueError(
+                        "KPOINTS candidates must have strictly "
+                        "increasing mesh products."
                     )
         return self

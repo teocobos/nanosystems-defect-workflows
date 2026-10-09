@@ -52,21 +52,43 @@ def _render_scf(
 
     scf = config.scf
 
-    return [
+    if config.k_points is not None and scf.solver == "OT":
+        raise CP2KGenerationError(
+            "Explicit k-point sampling requires "
+            "SCF solver DIAGONALIZATION; OT is unsupported."
+        )
+
+    lines = [
         "    &SCF",
         f"      SCF_GUESS {scf.scf_guess}",
         f"      EPS_SCF {scf.eps_scf:.8g}",
         f"      MAX_SCF {scf.max_scf}",
-        "      &OT",
-        f"        MINIMIZER {scf.ot_minimizer}",
-        f"        PRECONDITIONER {scf.ot_preconditioner}",
-        f"        ENERGY_GAP {scf.energy_gap:.8g}",
-        "      &END OT",
-        "      &OUTER_SCF",
-        f"        MAX_SCF {scf.outer_scf_max}",
-        "      &END OUTER_SCF",
-        "    &END SCF",
     ]
+
+    if scf.solver == "OT":
+        lines.extend([
+            "      &OT",
+            f"        MINIMIZER {scf.ot_minimizer}",
+            f"        PRECONDITIONER {scf.ot_preconditioner}",
+            f"        ENERGY_GAP {scf.energy_gap:.8g}",
+            "      &END OT",
+            "      &OUTER_SCF",
+            f"        MAX_SCF {scf.outer_scf_max}",
+            "      &END OUTER_SCF",
+        ])
+    elif scf.solver == "DIAGONALIZATION":
+        lines.extend([
+            "      &DIAGONALIZATION",
+            "        ALGORITHM STANDARD",
+            "      &END DIAGONALIZATION",
+        ])
+    else:
+        raise CP2KGenerationError(
+            f"Unsupported SCF solver: {scf.solver}"
+        )
+
+    lines.append("    &END SCF")
+    return lines
 
 
 def _render_kpoints(

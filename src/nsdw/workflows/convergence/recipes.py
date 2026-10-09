@@ -151,3 +151,102 @@ def apply_selected_cutoff(
             "cutoff_ry": selected_cutoff_ry,
         }
     )
+
+
+
+def build_cp2k_kpoint_study(
+    *,
+    meshes: tuple[tuple[int, int, int], ...],
+) -> ConvergenceStudyDefinition:
+    """Build a k-point convergence study from an ordered mesh sequence.
+
+    Meshes must be supplied in increasing mesh-product order.
+    The mesh product is a cost proxy, not an irreducible k-point count.
+    """
+
+    candidates = [
+        ConvergenceCandidate(
+            label=f"{kx}x{ky}x{kz}",
+            order=order,
+            value=(kx, ky, kz),
+        )
+        for order, (kx, ky, kz) in enumerate(meshes)
+    ]
+
+    return ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.KPOINTS,
+        candidates=candidates,
+    )
+
+
+def selected_kpoint_mesh(
+    *,
+    study: ConvergenceStudyDefinition,
+    analysis,
+) -> tuple[int, int, int]:
+    """Resolve the selected mesh from a k-point convergence analysis."""
+
+    if study.parameter != ConvergenceParameter.KPOINTS:
+        raise ConvergenceRecipeError(
+            "Selected k-point mesh requires a KPOINTS study."
+        )
+
+    selected_label = analysis.selected_candidate_label
+
+    if selected_label is None:
+        raise ConvergenceRecipeError(
+            "K-point convergence analysis did not select a candidate."
+        )
+
+    candidate = next(
+        (
+            item
+            for item in study.candidates
+            if item.label == selected_label
+        ),
+        None,
+    )
+
+    if candidate is None:
+        raise ConvergenceRecipeError(
+            f"Selected k-point candidate {selected_label!r} "
+            "is not present in the study."
+        )
+
+    mesh = candidate.value
+
+    if not (
+        isinstance(mesh, tuple)
+        and len(mesh) == 3
+        and all(type(value) is int and value > 0 for value in mesh)
+    ):
+        raise ConvergenceRecipeError(
+            "Selected candidate does not contain a valid k-point mesh."
+        )
+
+    return mesh
+
+
+def apply_selected_kpoints(
+    *,
+    base_config: CP2KInputConfig,
+    study: ConvergenceStudyDefinition,
+    analysis,
+) -> CP2KInputConfig:
+    """Apply the selected mesh with a compatible SCF solver."""
+
+    mesh = selected_kpoint_mesh(
+        study=study,
+        analysis=analysis,
+    )
+
+    updated_scf = base_config.scf.model_copy(
+        update={"solver": "DIAGONALIZATION"}
+    )
+
+    return base_config.model_copy(
+        update={
+            "k_points": mesh,
+            "scf": updated_scf,
+        }
+    )

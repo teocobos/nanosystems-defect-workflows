@@ -143,3 +143,123 @@ def test_missing_input_file_rejected(
         parse_cp2k_input(
             tmp_path / "missing.inp"
         )
+
+
+
+def test_detects_explicit_diagonalization_solver():
+    text = """
+&FORCE_EVAL
+  &DFT
+    &SCF
+      &DIAGONALIZATION
+        ALGORITHM STANDARD
+      &END DIAGONALIZATION
+    &END SCF
+  &END DFT
+&END FORCE_EVAL
+"""
+    result = parse_cp2k_input_text(text)
+    assert result.scf_solver == "DIAGONALIZATION"
+
+
+def test_detects_explicit_ot_solver():
+    text = """
+&FORCE_EVAL
+  &DFT
+    &SCF
+      &OT
+        MINIMIZER DIIS
+      &END OT
+    &END SCF
+  &END DFT
+&END FORCE_EVAL
+"""
+    result = parse_cp2k_input_text(text)
+    assert result.scf_solver == "OT"
+
+
+def test_missing_solver_is_unknown():
+    text = """
+&FORCE_EVAL
+  &DFT
+    &SCF
+      EPS_SCF 1.0E-7
+    &END SCF
+  &END DFT
+&END FORCE_EVAL
+"""
+    result = parse_cp2k_input_text(text)
+    assert result.scf_solver is None
+
+
+def test_solver_outside_scf_is_ignored():
+    text = """
+&FORCE_EVAL
+  &DFT
+    &SCF
+      EPS_SCF 1.0E-7
+    &END SCF
+  &END DFT
+&END FORCE_EVAL
+&OT
+&END OT
+"""
+    result = parse_cp2k_input_text(text)
+    assert result.scf_solver is None
+
+
+def test_solver_mentions_in_comments_are_ignored():
+    text = """
+&FORCE_EVAL
+  &DFT
+    &SCF
+      ! &OT
+      # &OT
+      &DIAGONALIZATION
+      &END DIAGONALIZATION
+    &END SCF
+  &END DFT
+&END FORCE_EVAL
+"""
+    result = parse_cp2k_input_text(text)
+    assert result.scf_solver == "DIAGONALIZATION"
+
+
+def test_conflicting_scf_solvers_are_rejected():
+    text = """
+&FORCE_EVAL
+  &DFT
+    &SCF
+      &OT
+      &END OT
+      &DIAGONALIZATION
+      &END DIAGONALIZATION
+    &END SCF
+  &END DFT
+&END FORCE_EVAL
+"""
+    with pytest.raises(
+        CP2KInputParseError,
+        match="Conflicting",
+    ):
+        parse_cp2k_input_text(text)
+
+
+def test_repeated_scf_solver_sections_are_rejected():
+    text = """
+&FORCE_EVAL
+  &DFT
+    &SCF
+      &OT
+      &END OT
+      &OT
+      &END OT
+    &END SCF
+  &END DFT
+&END FORCE_EVAL
+"""
+    with pytest.raises(
+        CP2KInputParseError,
+        match="repeated",
+    ):
+        parse_cp2k_input_text(text)

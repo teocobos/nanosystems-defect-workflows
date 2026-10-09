@@ -1,3 +1,4 @@
+from nsdw_test_validated_project_fixture import create_existing_validated_project
 """Tests for the NSDW command-line interface."""
 
 from pathlib import Path
@@ -1187,7 +1188,7 @@ def test_workflow_production_generate(
         ),
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=ProjectConfig(
             name="oxide-project",
@@ -1347,7 +1348,7 @@ def test_workflow_production_submit_aiida(
         ),
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=ProjectConfig(
             name="oxide-project",
@@ -1704,7 +1705,7 @@ def test_workflow_production_submit_uses_hpc_profile(
         ),
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=ProjectConfig(
             name="profile-project",
@@ -1850,7 +1851,7 @@ def test_workflow_production_submit_hpc_profile_overrides(
         ),
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=ProjectConfig(
             name="override-project",
@@ -1975,7 +1976,7 @@ def test_workflow_production_submit_requires_code_or_profile(
         ),
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=ProjectConfig(
             name="missing-execution-project",

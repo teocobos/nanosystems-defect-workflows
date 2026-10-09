@@ -228,6 +228,143 @@ def _parse_kinds(
     return tuple(kinds)
 
 
+
+
+def _parse_scf_solver(text: str) -> str | None:
+    """Detect an explicitly configured SCF solver."""
+    stack: list[str] = []
+    solvers: list[str] = []
+
+    for original in text.splitlines():
+        line = original.split("!", 1)[0].split("#", 1)[0].strip()
+
+        if not line.startswith("&"):
+            continue
+
+        parts = line.split()
+        marker = parts[0].upper()
+
+        if marker == "&END" or marker.startswith("&END_"):
+            if stack:
+                stack.pop()
+            continue
+
+        if marker.startswith("&END"):
+            if stack:
+                stack.pop()
+            continue
+
+        section = marker[1:]
+
+        if section in {"OT", "DIAGONALIZATION"}:
+            if stack and stack[-1] == "SCF":
+                solvers.append(section)
+
+        stack.append(section)
+
+    if len(solvers) > 1:
+        raise CP2KInputParseError(
+            "Conflicting or repeated SCF solver sections."
+        )
+
+    return solvers[0] if solvers else None
+
+
+def _scf_keyword_values(text: str) -> dict[str, str]:
+    """Extract SCF keywords using their exact nested section paths.
+
+    This is a deliberately restricted parser for generated CP2K
+    SCF inputs, not a general CP2K preprocessing implementation.
+    """
+    stack: list[str] = []
+    values: dict[str, str] = {}
+
+    fields = {
+        ("SCF",): {
+            "SCF_GUESS",
+            "EPS_SCF",
+            "MAX_SCF",
+        },
+        ("SCF", "OUTER_SCF"): {
+            "MAX_SCF",
+        },
+        ("SCF", "OT"): {
+            "MINIMIZER",
+            "PRECONDITIONER",
+            "ENERGY_GAP",
+        },
+    }
+
+    for original in text.splitlines():
+        line = original.split("!", 1)[0].split("#", 1)[0].strip()
+
+        if not line:
+            continue
+
+        if line.startswith("&"):
+            parts = line.split()
+            marker = parts[0].upper()
+
+            if marker.startswith("&END"):
+                if not stack:
+                    raise CP2KInputParseError(
+                        "Unexpected CP2K section terminator."
+                    )
+
+                expected = stack[-1]
+                explicit = (
+                    parts[1].upper()
+                    if marker == "&END" and len(parts) > 1
+                    else marker.removeprefix("&END_")
+                    if marker.startswith("&END_")
+                    else None
+                )
+
+                if explicit and explicit != expected:
+                    raise CP2KInputParseError(
+                        "Mismatched CP2K section terminator."
+                    )
+
+                stack.pop()
+            else:
+                stack.append(marker[1:])
+
+            continue
+
+        parts = line.split(None, 1)
+
+        if len(parts) != 2:
+            continue
+
+        keyword, value = parts
+        keyword = keyword.upper()
+
+        # Match the trailing SCF path, regardless of the
+        # enclosing FORCE_EVAL/DFT hierarchy.
+        for suffix, accepted in fields.items():
+            if (
+                len(stack) >= len(suffix)
+                and tuple(stack[-len(suffix):]) == suffix
+                and keyword in accepted
+            ):
+                key = "/".join((*suffix, keyword))
+
+                if key in values:
+                    raise CP2KInputParseError(
+                        f"Repeated SCF setting: {key}"
+                    )
+
+                values[key] = value.strip()
+                break
+
+    if stack:
+        raise CP2KInputParseError(
+            "Unclosed CP2K section in input."
+        )
+
+    return values
+
+
 def parse_cp2k_input_text(
     text: str,
 ) -> ParsedCP2KInput:
@@ -239,6 +376,7 @@ def parse_cp2k_input_text(
         )
 
     warnings: list[str] = []
+    scf_values = _scf_keyword_values(text)
 
     mgrid = _section(
         text,
@@ -295,9 +433,24 @@ def parse_cp2k_input_text(
                 "EPS_SCF",
             )
         ),
+        scf_guess=scf_values.get("SCF/SCF_GUESS"),
+        max_scf=_parse_int(
+            scf_values.get("SCF/MAX_SCF")
+        ),
+        outer_scf_max=_parse_int(
+            scf_values.get("SCF/OUTER_SCF/MAX_SCF")
+        ),
+        ot_minimizer=scf_values.get("SCF/OT/MINIMIZER"),
+        ot_preconditioner=scf_values.get(
+            "SCF/OT/PRECONDITIONER"
+        ),
+        energy_gap=_parse_float(
+            scf_values.get("SCF/OT/ENERGY_GAP")
+        ),
         k_points=_parse_k_points(
             text
         ),
+        scf_solver=_parse_scf_solver(text),
         kinds=_parse_kinds(
             text
         ),

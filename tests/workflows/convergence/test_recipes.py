@@ -334,3 +334,106 @@ def test_apply_selected_cutoff_rejects_wrong_parameter() -> None:
             study=study,
             analysis=analysis,
         )
+
+
+
+def test_build_cp2k_kpoint_study():
+    from nsdw.workflows.convergence.recipes import (
+        build_cp2k_kpoint_study,
+    )
+
+    study = build_cp2k_kpoint_study(
+        meshes=((1, 1, 1), (2, 2, 1), (3, 3, 1)),
+    )
+
+    assert study.parameter == ConvergenceParameter.KPOINTS
+    assert [candidate.value for candidate in study.candidates] == [
+        (1, 1, 1),
+        (2, 2, 1),
+        (3, 3, 1),
+    ]
+    assert [candidate.label for candidate in study.candidates] == [
+        "1x1x1",
+        "2x2x1",
+        "3x3x1",
+    ]
+
+
+def test_kpoint_recipe_rejects_decreasing_meshes():
+    from pydantic import ValidationError
+    from nsdw.workflows.convergence.recipes import (
+        build_cp2k_kpoint_study,
+    )
+
+    with pytest.raises(ValidationError):
+        build_cp2k_kpoint_study(
+            meshes=((3, 3, 1), (2, 2, 1)),
+        )
+
+
+def test_selected_kpoint_mesh_resolves_selection():
+    from types import SimpleNamespace
+    from nsdw.workflows.convergence.recipes import (
+        build_cp2k_kpoint_study,
+        selected_kpoint_mesh,
+    )
+
+    study = build_cp2k_kpoint_study(
+        meshes=((1, 1, 1), (2, 2, 1), (3, 3, 1)),
+    )
+
+    analysis = SimpleNamespace(
+        selected_candidate_label="2x2x1"
+    )
+
+    assert selected_kpoint_mesh(
+        study=study,
+        analysis=analysis,
+    ) == (2, 2, 1)
+
+
+def test_selected_kpoint_mesh_rejects_missing_selection():
+    from types import SimpleNamespace
+    from nsdw.workflows.convergence.recipes import (
+        build_cp2k_kpoint_study,
+        selected_kpoint_mesh,
+    )
+
+    study = build_cp2k_kpoint_study(
+        meshes=((1, 1, 1), (2, 2, 1)),
+    )
+
+    with pytest.raises(ConvergenceRecipeError):
+        selected_kpoint_mesh(
+            study=study,
+            analysis=SimpleNamespace(
+                selected_candidate_label=None
+            ),
+        )
+
+
+def test_apply_selected_kpoints_sets_diagonalization():
+    from types import SimpleNamespace
+    from nsdw.workflows.convergence.recipes import (
+        apply_selected_kpoints,
+        build_cp2k_kpoint_study,
+    )
+
+    study = build_cp2k_kpoint_study(
+        meshes=((1, 1, 1), (2, 2, 1), (3, 3, 1)),
+    )
+
+    config = CP2KInputConfig(project_name="kpoint-test")
+
+    result = apply_selected_kpoints(
+        base_config=config,
+        study=study,
+        analysis=SimpleNamespace(
+            selected_candidate_label="2x2x1"
+        ),
+    )
+
+    assert result.k_points == (2, 2, 1)
+    assert result.scf.solver == "DIAGONALIZATION"
+    assert config.k_points is None
+    assert config.scf.solver == "OT"

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from nsdw.calculators.cp2k.generation_models import (
+    CP2KSCFConfig,
     CP2KInputConfig,
 )
 from nsdw.calculators.cp2k.generator import (
@@ -210,9 +211,13 @@ def test_generates_explicit_kpoints(
     """Configured Monkhorst-Pack k-points should be rendered."""
 
     text = render_cp2k_input(
-        make_config(
-            k_points=(6, 6, 1),
-        ),
+        make_config(k_points=(6, 6, 1)).model_copy(
+    update={
+        "scf": CP2KSCFConfig(
+            solver="DIAGONALIZATION"
+        )
+    }
+),
         igzo_structure,
     )
 

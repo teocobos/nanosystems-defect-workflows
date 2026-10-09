@@ -38,6 +38,9 @@ aiida = [
     "aiida-cp2k>=2.1.1,<3.0",
     "aiida-pseudo>=1.10,<2.0"
 ]
+doped = [
+    "doped"
+]
 
 [project.scripts]
 nsdw = "nsdw.cli:app"
@@ -47,4 +50,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]

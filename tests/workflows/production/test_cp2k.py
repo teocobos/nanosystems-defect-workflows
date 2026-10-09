@@ -1,3 +1,4 @@
+from nsdw_test_validated_project_fixture import create_existing_validated_project
 import pytest
 
 from unittest.mock import patch
@@ -141,7 +142,7 @@ def test_build_cp2k_production_config_from_workspace(
         },
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=config,
     )
@@ -237,7 +238,7 @@ def test_generate_cp2k_production_package_from_workspace(
         ),
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=ProjectConfig(
             name="oxide-project",
@@ -369,7 +370,7 @@ def test_submit_cp2k_production_aiida_uses_validated_methodology(
         ),
     )
 
-    create_project(
+    create_existing_validated_project(
         root=project_root,
         config=ProjectConfig(
             name="oxide-aiida-project",

@@ -69,6 +69,11 @@ class CP2KSCFConfig(BaseModel):
         frozen=True,
     )
 
+    solver: str = Field(
+        default="OT",
+        pattern=r"^(OT|DIAGONALIZATION)$",
+    )
+
     scf_guess: str = "ATOMIC"
 
     eps_scf: float = Field(
