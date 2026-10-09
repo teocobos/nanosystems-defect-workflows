@@ -1,3 +1,9 @@
+import hashlib
+import json
+
+from nsdw.structures.select_supercell import select_supercell
+from nsdw.structures.supercell_selection import SupercellSelectionError
+
 from pathlib import Path
 from typing import Literal
 from pydantic import ValidationError
@@ -1083,6 +1089,195 @@ def structure_supercell(
             console=console,
             top=top,
         )
+
+
+
+# ============================================================================
+# Unified supercell selection
+# ============================================================================
+
+
+@structure_app.command("select-supercell")
+def structure_select_supercell(
+    file: Path = typer.Argument(
+        ...,
+        help="Input periodic structure (CIF or XYZ).",
+    ),
+    engine: Literal["doped", "manual", "native"] = typer.Option(
+        "doped",
+        "--engine",
+        help="Supercell selection engine.",
+    ),
+    matrix: str | None = typer.Option(
+        None,
+        "--matrix",
+        help=(
+            "Manual 3x3 matrix as JSON, e.g. "
+            "'[[3,0,0],[0,3,0],[0,0,1]]'."
+        ),
+    ),
+    min_atoms: int = typer.Option(
+        50, "--min-atoms", min=1,
+    ),
+    max_atoms: int = typer.Option(
+        250, "--max-atoms", min=1,
+    ),
+    min_image_distance: float = typer.Option(
+        10.0, "--min-image-distance", min=0.0,
+    ),
+    max_scale: int = typer.Option(
+        4, "--max-scale", min=1,
+    ),
+    image_range: int = typer.Option(
+        2, "--image-range", min=1,
+    ),
+    ideal_threshold: float = typer.Option(
+        0.0, "--ideal-threshold",
+    ),
+    output_dir: Path = typer.Option(
+        Path("outputs/supercells"),
+        "--output-dir",
+        help="Directory for CIF and JSON outputs.",
+    ),
+    a: float | None = typer.Option(None, "--a"),
+    b: float | None = typer.Option(None, "--b"),
+    c: float | None = typer.Option(None, "--c"),
+    alpha: float | None = typer.Option(None, "--alpha"),
+    beta: float | None = typer.Option(None, "--beta"),
+    gamma: float | None = typer.Option(None, "--gamma"),
+) -> None:
+    """Select and export a periodic supercell."""
+
+    try:
+        lattice_parameters = _resolve_lattice_parameters(
+            a=a, b=b, c=c,
+            alpha=alpha, beta=beta, gamma=gamma,
+        )
+
+        structure, parser_warnings = load_structure(
+            file,
+            lattice_parameters=lattice_parameters,
+        )
+
+        parsed_matrix = None
+        if matrix is not None:
+            try:
+                parsed_matrix = json.loads(matrix)
+            except json.JSONDecodeError as exc:
+                raise SupercellSelectionError(
+                    "--matrix must contain valid JSON."
+                ) from exc
+
+        selection = select_supercell(
+            structure,
+            engine=engine,
+            matrix=parsed_matrix,
+            min_atoms=min_atoms,
+            max_atoms=max_atoms,
+            min_image_distance=min_image_distance,
+            max_scale=max_scale,
+            image_range=image_range,
+            ideal_threshold=ideal_threshold,
+        )
+
+        input_path = file.expanduser().resolve()
+        input_hash = hashlib.sha256(
+            input_path.read_bytes()
+        ).hexdigest()
+
+        destination = output_dir.expanduser().resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+
+        stem = f"{file.stem}_{engine}_{selection.num_atoms}atoms"
+        cif_path = destination / f"{stem}.cif"
+        json_path = destination / f"{stem}.json"
+
+        if cif_path.exists() or json_path.exists():
+            raise SupercellSelectionError(
+                "Output already exists. Choose another --output-dir "
+                "or remove the previous output explicitly."
+            )
+
+        metadata = {
+            "schema_version": 1,
+            "nsdw_version": __version__,
+            "engine": selection.engine,
+            "source_path": str(input_path),
+            "source_sha256": input_hash,
+            "primitive_num_atoms": selection.primitive_num_atoms,
+            "num_atoms": selection.num_atoms,
+            "determinant": selection.determinant,
+            "transformation_matrix": [
+                list(row)
+                for row in selection.transformation_matrix
+            ],
+            "minimum_image_distance_angstrom": (
+                selection.minimum_image_distance_angstrom
+            ),
+            "selection_parameters": {
+                "min_atoms": min_atoms,
+                "max_atoms": max_atoms,
+                "min_image_distance_angstrom": min_image_distance,
+                "max_scale": max_scale,
+                "image_range": image_range,
+                "ideal_threshold": ideal_threshold,
+            },
+            "parser_warnings": [
+                str(warning) for warning in parser_warnings
+            ],
+            "cif_filename": cif_path.name,
+        }
+
+        # Prepare both outputs before creating any files.
+        from pymatgen.io.cif import CifWriter
+
+        cif_content = str(CifWriter(selection.structure))
+        cif_bytes = cif_content.encode("utf-8")
+
+        metadata["cif_sha256"] = hashlib.sha256(
+            cif_bytes
+        ).hexdigest()
+
+        json_content = json.dumps(metadata, indent=2) + "\n"
+
+        # Exclusive creation prevents accidental overwrites.
+        # Only files created by this attempt may be removed.
+        created_paths = []
+
+        try:
+            with cif_path.open("xb") as handle:
+                created_paths.append(cif_path)
+                handle.write(cif_bytes)
+
+            with json_path.open("x", encoding="utf-8") as handle:
+                created_paths.append(json_path)
+                handle.write(json_content)
+
+        except OSError:
+            for created_path in reversed(created_paths):
+                created_path.unlink(missing_ok=True)
+            raise
+
+    except (
+        FileNotFoundError,
+        StructureParseError,
+        SupercellSelectionError,
+        ValueError,
+        OSError,
+    ) as exc:
+        console.print(f"[bold red]ERROR:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[green]✓[/green] Selected {selection.num_atoms}-atom "
+        f"supercell using {selection.engine}."
+    )
+    console.print(
+        f"Minimum-image distance: "
+        f"{selection.minimum_image_distance_angstrom:.3f} Å"
+    )
+    console.print(f"CIF:  {cif_path}")
+    console.print(f"JSON: {json_path}")
 
 
 # ============================================================================
