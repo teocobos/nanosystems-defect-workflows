@@ -1459,3 +1459,562 @@ def test_workflow_production_submit_aiida(
     assert resources.environment_variables == {
         "OMP_NUM_THREADS": "4",
     }
+
+
+def test_cli_hpc_path(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(tmp_path),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "path",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    assert str(
+        tmp_path / "nsdw" / "hpc-profiles.yaml"
+    ) in result.stdout
+
+
+def test_cli_hpc_configure_and_show(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(tmp_path),
+    )
+
+    configure_result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "configure",
+            "lumi",
+            "--computer",
+            "lumi-c",
+            "--code",
+            "cp2k-lumi-c@lumi-c",
+            "--aiida-profile",
+            "nsdw-dev",
+            "--queue",
+            "debug",
+            "--account",
+            "project_465003407",
+            "--machines",
+            "1",
+            "--mpi-per-machine",
+            "1",
+            "--omp-threads",
+            "2",
+            "--walltime",
+            "600",
+        ],
+    )
+
+    assert configure_result.exit_code == 0, (
+        configure_result.output
+    )
+
+    assert (
+        "HPC profile configured"
+        in configure_result.stdout
+    )
+
+    show_result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "show",
+            "lumi",
+        ],
+    )
+
+    assert show_result.exit_code == 0, show_result.output
+
+    assert "HPC profile: lumi" in show_result.stdout
+    assert "lumi-c" in show_result.stdout
+    assert "cp2k-lumi-c@lumi-c" in show_result.stdout
+    assert "nsdw-dev" in show_result.stdout
+    assert "project_465003407" in show_result.stdout
+    assert "600 s" in show_result.stdout
+
+
+def test_cli_hpc_list(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(tmp_path),
+    )
+
+    configure_result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "configure",
+            "lumi",
+            "--computer",
+            "lumi-c",
+            "--code",
+            "cp2k-lumi-c@lumi-c",
+        ],
+    )
+
+    assert configure_result.exit_code == 0, (
+        configure_result.output
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "list",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "lumi" in result.stdout
+    assert "lumi-c" in result.stdout
+    assert "aiida" in result.stdout
+
+
+def test_cli_hpc_list_empty(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(tmp_path),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "list",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    assert (
+        "No HPC profiles configured"
+        in result.stdout
+    )
+
+
+def test_cli_hpc_delete(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(tmp_path),
+    )
+
+    configure_result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "configure",
+            "lumi",
+            "--computer",
+            "lumi-c",
+            "--code",
+            "cp2k-lumi-c@lumi-c",
+        ],
+    )
+
+    assert configure_result.exit_code == 0, (
+        configure_result.output
+    )
+
+    delete_result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "delete",
+            "lumi",
+        ],
+    )
+
+    assert delete_result.exit_code == 0, (
+        delete_result.output
+    )
+
+    assert (
+        "HPC profile deleted"
+        in delete_result.stdout
+    )
+
+    show_result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "show",
+            "lumi",
+        ],
+    )
+
+    assert show_result.exit_code == 1
+    assert "HPC profile not found" in show_result.stdout
+
+
+def test_workflow_production_submit_uses_hpc_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "profile-project"
+
+    methodology = CP2KProductionMethodology(
+        status="validated",
+        functional=CP2KXCFunctional.PBE,
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        k_points=None,
+        scf=CP2KSCFConfig(
+            eps_scf=1.0e-7,
+            max_scf=150,
+        ),
+        basis_potential=CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="DZVP-MOLOPT-SR-GTH",
+                    potential="GTH-PBE-q6",
+                ),
+            ),
+        ),
+        provenance=CP2KMethodologyProvenance(
+            source="convergence",
+            workflow="standard_cp2k_convergence",
+        ),
+    )
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="profile-project",
+            material="O",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+            methodology={
+                "cp2k": methodology,
+            },
+        ),
+    )
+
+    structure_file = (
+        project_root
+        / "structures"
+        / "validated"
+        / "oxygen.cif"
+    )
+
+    Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[[0.0, 0.0, 0.0]],
+    ).to(filename=structure_file)
+
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(tmp_path / "config"),
+    )
+
+    configure_result = runner.invoke(
+        app,
+        [
+            "hpc",
+            "configure",
+            "lumi",
+            "--computer",
+            "lumi-c",
+            "--code",
+            "cp2k-lumi-c@lumi-c",
+            "--aiida-profile",
+            "nsdw-dev",
+            "--queue",
+            "debug",
+            "--account",
+            "project_465003407",
+            "--machines",
+            "1",
+            "--mpi-per-machine",
+            "2",
+            "--omp-threads",
+            "4",
+            "--walltime",
+            "900",
+        ],
+    )
+
+    assert configure_result.exit_code == 0, (
+        configure_result.output
+    )
+
+    submission = Mock()
+
+    submission.result.calculation_id = "oxygen-profile"
+    submission.result.backend.value = "aiida"
+    submission.result.state.value = "submitted"
+    submission.result.process_id = "40"
+    submission.result.process_uuid = "profile-test-uuid"
+    submission.result.host = "efp.lumi.csc.fi"
+
+    monkeypatch.chdir(project_root)
+
+    with patch(
+        "nsdw.cli.submit_cp2k_production_aiida",
+        return_value=submission,
+    ) as submit_mock:
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "production-submit",
+                str(structure_file),
+                "--name",
+                "oxygen-profile",
+                "--hpc-profile",
+                "lumi",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    call = submit_mock.call_args.kwargs
+
+    assert call["code_label"] == (
+        "cp2k-lumi-c@lumi-c"
+    )
+
+    assert call["profile"] == "nsdw-dev"
+
+    resources = call["resources"]
+
+    assert resources.num_machines == 1
+    assert resources.num_mpiprocs_per_machine == 2
+    assert resources.max_wallclock_seconds == 900
+    assert resources.queue_name == "debug"
+    assert resources.account == "project_465003407"
+
+    assert resources.environment_variables == {
+        "OMP_NUM_THREADS": "4",
+    }
+
+
+def test_workflow_production_submit_hpc_profile_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "override-project"
+
+    methodology = CP2KProductionMethodology(
+        status="validated",
+        functional=CP2KXCFunctional.PBE,
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        k_points=None,
+        scf=CP2KSCFConfig(
+            eps_scf=1.0e-7,
+            max_scf=150,
+        ),
+        basis_potential=CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="DZVP-MOLOPT-SR-GTH",
+                    potential="GTH-PBE-q6",
+                ),
+            ),
+        ),
+        provenance=CP2KMethodologyProvenance(
+            source="convergence",
+            workflow="standard_cp2k_convergence",
+        ),
+    )
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="override-project",
+            material="O",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+            methodology={"cp2k": methodology},
+        ),
+    )
+
+    structure_file = (
+        project_root
+        / "structures"
+        / "validated"
+        / "oxygen.cif"
+    )
+
+    Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[[0.0, 0.0, 0.0]],
+    ).to(filename=structure_file)
+
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(tmp_path / "config"),
+    )
+
+    assert runner.invoke(
+        app,
+        [
+            "hpc",
+            "configure",
+            "lumi",
+            "--computer",
+            "lumi-c",
+            "--code",
+            "profile-code",
+            "--aiida-profile",
+            "profile-aiida",
+            "--walltime",
+            "600",
+            "--omp-threads",
+            "2",
+        ],
+    ).exit_code == 0
+
+    submission = Mock()
+
+    submission.result.calculation_id = "override-test"
+    submission.result.backend.value = "aiida"
+    submission.result.state.value = "submitted"
+    submission.result.process_id = "41"
+    submission.result.process_uuid = "override-uuid"
+    submission.result.host = "host"
+
+    monkeypatch.chdir(project_root)
+
+    with patch(
+        "nsdw.cli.submit_cp2k_production_aiida",
+        return_value=submission,
+    ) as submit_mock:
+        result = runner.invoke(
+            app,
+            [
+                "workflow",
+                "production-submit",
+                str(structure_file),
+                "--name",
+                "override-test",
+                "--hpc-profile",
+                "lumi",
+                "--code",
+                "override-code",
+                "--profile",
+                "override-aiida",
+                "--walltime",
+                "1200",
+                "--omp-threads",
+                "8",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    call = submit_mock.call_args.kwargs
+
+    assert call["code_label"] == "override-code"
+    assert call["profile"] == "override-aiida"
+
+    assert (
+        call["resources"].max_wallclock_seconds
+        == 1200
+    )
+
+    assert call[
+        "resources"
+    ].environment_variables == {
+        "OMP_NUM_THREADS": "8",
+    }
+
+
+def test_workflow_production_submit_requires_code_or_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "missing-execution-project"
+
+    methodology = CP2KProductionMethodology(
+        status="validated",
+        functional=CP2KXCFunctional.PBE,
+        cutoff_ry=560.0,
+        relative_cutoff_ry=40.0,
+        k_points=None,
+        scf=CP2KSCFConfig(
+            eps_scf=1.0e-7,
+            max_scf=150,
+        ),
+        provenance=CP2KMethodologyProvenance(
+            source="convergence",
+            workflow="standard_cp2k_convergence",
+        ),
+    )
+
+    create_project(
+        root=project_root,
+        config=ProjectConfig(
+            name="missing-execution-project",
+            material="O",
+            nsdw_version="0.1.0",
+            components=["cp2k"],
+            methodology={"cp2k": methodology},
+        ),
+    )
+
+    structure_file = (
+        project_root
+        / "structures"
+        / "validated"
+        / "oxygen.cif"
+    )
+
+    Structure(
+        lattice=Lattice.cubic(5.0),
+        species=["O"],
+        coords=[[0.0, 0.0, 0.0]],
+    ).to(filename=structure_file)
+
+    monkeypatch.chdir(project_root)
+
+    result = runner.invoke(
+        app,
+        [
+            "workflow",
+            "production-submit",
+            str(structure_file),
+            "--name",
+            "missing-execution",
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert (
+        "Either --code or --hpc-profile must be supplied"
+        in result.stdout
+    )

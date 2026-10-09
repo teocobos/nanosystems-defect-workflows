@@ -101,6 +101,13 @@ from nsdw.workflows.production.models import (
     CP2KProductionRecipe,
 )
 
+from nsdw.cli_hpc import hpc_app
+
+from nsdw.execution.profiles import (
+    HPCProfileStoreError,
+    get_hpc_profile,
+)
+
 app = typer.Typer(
     name="nsdw",
     help="Nanosystems Defect Workflows",
@@ -145,6 +152,11 @@ app.add_typer(
 app.add_typer(
     workflow_app,
     name="workflow",
+)
+
+app.add_typer(
+    hpc_app,
+    name="hpc",
 )
 
 app.add_typer(
@@ -1676,13 +1688,18 @@ def workflow_production_submit(
         "-n",
         help="Production calculation name.",
     ),
-    code: str = typer.Option(
-        ...,
+    code: str | None = typer.Option(
+        None,
         "--code",
         help=(
-            "AiiDA CP2K code label, for example "
-            "'cp2k-lumi-c@lumi-c'."
+            "AiiDA CP2K code label. Required when "
+            "--hpc-profile is not supplied."
         ),
+    ),
+    hpc_profile: str | None = typer.Option(
+        None,
+        "--hpc-profile",
+        help="Reusable NSDW HPC profile name.",
     ),
     charge: int = typer.Option(
         0,
@@ -1715,29 +1732,29 @@ def workflow_production_submit(
         "--account",
         help="Scheduler project/account.",
     ),
-    machines: int = typer.Option(
-        1,
+    machines: int | None = typer.Option(
+        None,
         "--machines",
         min=1,
-        help="Number of compute nodes.",
+        help="Override number of compute nodes.",
     ),
-    mpi_per_machine: int = typer.Option(
-        1,
+    mpi_per_machine: int | None = typer.Option(
+        None,
         "--mpi-per-machine",
         min=1,
-        help="MPI processes per compute node.",
+        help="Override MPI processes per compute node.",
     ),
-    omp_threads: int = typer.Option(
-        1,
+    omp_threads: int | None = typer.Option(
+        None,
         "--omp-threads",
         min=1,
-        help="OpenMP threads per MPI process.",
+        help="Override OpenMP threads per MPI process.",
     ),
-    walltime: int = typer.Option(
-        600,
+    walltime: int | None = typer.Option(
+        None,
         "--walltime",
         min=1,
-        help="Maximum walltime in seconds.",
+        help="Override maximum walltime in seconds.",
     ),
 ) -> None:
     """Submit a validated CP2K production calculation through AiiDA."""
@@ -1758,14 +1775,115 @@ def workflow_production_submit(
             multiplicity=multiplicity,
         )
 
+        if hpc_profile is not None:
+            selected_hpc_profile = get_hpc_profile(
+                hpc_profile
+            )
+
+            if selected_hpc_profile.backend.value != "aiida":
+                raise ValueError(
+                    "CP2K production submission currently "
+                    "requires an AiiDA HPC profile"
+                )
+
+            resolved_code = (
+                code
+                if code is not None
+                else selected_hpc_profile.code
+            )
+
+            resolved_profile = (
+                profile
+                if profile is not None
+                else selected_hpc_profile.aiida_profile
+            )
+
+            profile_resources = (
+                selected_hpc_profile.resources
+            )
+
+            resolved_machines = (
+                machines
+                if machines is not None
+                else profile_resources.machines
+            )
+
+            resolved_mpi_per_machine = (
+                mpi_per_machine
+                if mpi_per_machine is not None
+                else profile_resources.mpi_per_machine
+            )
+
+            resolved_omp_threads = (
+                omp_threads
+                if omp_threads is not None
+                else profile_resources.omp_threads
+            )
+
+            resolved_walltime = (
+                walltime
+                if walltime is not None
+                else profile_resources.walltime_seconds
+            )
+
+            resolved_queue = (
+                queue
+                if queue is not None
+                else profile_resources.queue
+            )
+
+            resolved_account = (
+                account
+                if account is not None
+                else profile_resources.account
+            )
+
+        else:
+            if code is None:
+                raise ValueError(
+                    "Either --code or --hpc-profile must be supplied"
+                )
+
+            resolved_code = code
+            resolved_profile = profile
+
+            resolved_machines = (
+                machines
+                if machines is not None
+                else 1
+            )
+
+            resolved_mpi_per_machine = (
+                mpi_per_machine
+                if mpi_per_machine is not None
+                else 1
+            )
+
+            resolved_omp_threads = (
+                omp_threads
+                if omp_threads is not None
+                else 1
+            )
+
+            resolved_walltime = (
+                walltime
+                if walltime is not None
+                else 600
+            )
+
+            resolved_queue = queue
+            resolved_account = account
+
         resources = AiiDACp2kResources(
-            num_machines=machines,
-            num_mpiprocs_per_machine=mpi_per_machine,
-            max_wallclock_seconds=walltime,
-            queue_name=queue,
-            account=account,
+            num_machines=resolved_machines,
+            num_mpiprocs_per_machine=resolved_mpi_per_machine,
+            max_wallclock_seconds=resolved_walltime,
+            queue_name=resolved_queue,
+            account=resolved_account,
             environment_variables={
-                "OMP_NUM_THREADS": str(omp_threads),
+                "OMP_NUM_THREADS": str(
+                    resolved_omp_threads
+                ),
             },
         )
 
@@ -1773,9 +1891,9 @@ def workflow_production_submit(
             workspace=workspace,
             structure=structure,
             recipe=recipe,
-            code_label=code,
+            code_label=resolved_code,
             resources=resources,
-            profile=profile,
+            profile=resolved_profile,
             label=name,
             description=(
                 "Submitted through the NSDW production workflow."
@@ -1790,6 +1908,7 @@ def workflow_production_submit(
         ValidationError,
         AiiDAUnavailableError,
         AiiDAExecutionError,
+        HPCProfileStoreError,
     ) as exc:
         console.print(
             f"[bold red]Error:[/bold red] {exc}"
