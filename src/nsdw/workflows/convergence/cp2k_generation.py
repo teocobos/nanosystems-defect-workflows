@@ -116,6 +116,19 @@ def generate_cp2k_convergence_study(
             exist_ok=True,
         )
 
+        config_path = output_directory / "base-config.json"
+
+        if config_path.exists():
+            raise CP2KConvergenceGenerationError(
+                "Convergence base configuration already exists: "
+                f"{config_path}"
+            )
+
+        config_path.write_text(
+            base_config.model_dump_json(indent=2) + "\n",
+            encoding="utf-8",
+        )
+
         structure.to(
             filename=output_directory / "structure.json",
             fmt="json",

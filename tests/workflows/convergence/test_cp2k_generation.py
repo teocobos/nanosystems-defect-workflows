@@ -547,3 +547,81 @@ def test_manifest_failure_rolls_back_generated_study(
             )
 
     assert not output_directory.exists()
+
+def test_generated_campaign_persists_base_config(
+    tmp_path: Path,
+) -> None:
+    """A generated campaign retains its original CP2K configuration."""
+
+    from nsdw.calculators.cp2k.generation_models import (
+        CP2KInputConfig,
+    )
+    from nsdw.workflows.convergence.recipes import (
+        build_standard_cp2k_relative_cutoff_study,
+    )
+
+    base_config = _base_config()
+    study = build_standard_cp2k_relative_cutoff_study()
+    output_directory = tmp_path / "relative-cutoff-study"
+
+    generate_cp2k_convergence_study(
+        structure=_structure(),
+        base_config=base_config,
+        study=study,
+        output_directory=output_directory,
+    )
+
+    config_path = output_directory / "base-config.json"
+
+    assert config_path.is_file()
+
+    restored = CP2KInputConfig.model_validate_json(
+        config_path.read_text(encoding="utf-8")
+    )
+
+    assert restored == base_config
+    assert restored.cutoff_ry == base_config.cutoff_ry
+
+    for value in range(10, 101, 10):
+        candidate_directory = (
+            output_directory / f"{value}-Ry"
+        )
+
+        input_files = list(candidate_directory.glob("*.inp"))
+
+        assert len(input_files) == 1
+
+        content = input_files[0].read_text()
+
+        assert f"REL_CUTOFF {value}" in content
+        assert f"CUTOFF {base_config.cutoff_ry:g}" in content
+
+
+def test_generation_preserves_existing_base_config(
+    tmp_path: Path,
+) -> None:
+    """Generation must not overwrite existing campaign configuration."""
+
+    from nsdw.workflows.convergence.recipes import (
+        build_standard_cp2k_relative_cutoff_study,
+    )
+
+    output_directory = tmp_path / "existing-campaign"
+    output_directory.mkdir()
+
+    config_path = output_directory / "base-config.json"
+    original_content = '{"existing": true}\n'
+    config_path.write_text(original_content, encoding="utf-8")
+
+    with pytest.raises(
+        CP2KConvergenceGenerationError,
+        match="base configuration already exists",
+    ):
+        generate_cp2k_convergence_study(
+            structure=_structure(),
+            base_config=_base_config(),
+            study=build_standard_cp2k_relative_cutoff_study(),
+            output_directory=output_directory,
+        )
+
+    assert config_path.read_text(encoding="utf-8") == original_content
