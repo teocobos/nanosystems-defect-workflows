@@ -1649,6 +1649,49 @@ def workflow_convergence_generate(
             )
 
 
+
+@workflow_app.command("convergence-analyse")
+def workflow_convergence_analyse(
+    campaign_directory: Path = typer.Argument(
+        ...,
+        help="Completed CP2K convergence campaign directory.",
+    ),
+) -> None:
+    """Analyse existing CP2K outputs without executing calculations."""
+
+    from nsdw.workflows.convergence.cp2k_workflow import (
+        analyse_and_report_existing_cp2k_convergence_campaign,
+    )
+
+    campaign_directory = campaign_directory.expanduser().resolve()
+
+    try:
+        report = analyse_and_report_existing_cp2k_convergence_campaign(
+            campaign_directory=campaign_directory,
+        )
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        console.print(f"[bold red]ERROR:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        "\n[bold green]Convergence analysis completed[/bold green]\n"
+    )
+    console.print(f"Parameter: {report.parameter.value}")
+    console.print(
+        f"Energy tolerance satisfied: "
+        f"{report.energy_tolerance_satisfied}"
+    )
+    console.print(
+        f"Selected candidate: {report.selected_candidate_label}"
+    )
+    console.print(
+        f"Report: {campaign_directory / 'convergence-report.json'}"
+    )
+    console.print(
+        f"CSV: {campaign_directory / 'convergence-report.csv'}"
+    )
+
+
 @workflow_app.command("convergence-run")
 def workflow_convergence_run(
     campaign_directory: Path = typer.Argument(
