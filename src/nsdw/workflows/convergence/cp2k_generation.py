@@ -8,6 +8,7 @@ from pathlib import Path
 from pymatgen.core import Structure
 
 from nsdw.calculators.cp2k.generation_models import (
+    CP2KBasisPotentialConfig,
     CP2KInputConfig,
 )
 from nsdw.calculators.cp2k.package import (
@@ -30,12 +31,55 @@ class CP2KConvergenceGenerationError(RuntimeError):
     """Raised when a CP2K convergence study cannot be generated."""
 
 
+
+
+def _validate_basis_candidate(
+    *,
+    base_config: CP2KInputConfig,
+    candidate: CP2KBasisPotentialConfig,
+) -> None:
+    """Require basis convergence to preserve pseudopotentials."""
+
+    reference = base_config.basis_potential
+
+    if reference is None:
+        raise CP2KConvergenceGenerationError(
+            "Basis convergence requires a base basis/potential configuration."
+        )
+
+    if candidate.potential_file != reference.potential_file:
+        raise CP2KConvergenceGenerationError(
+            "Basis candidates must preserve the pseudopotential file."
+        )
+
+    reference_potentials = {
+        kind.element: kind.potential
+        for kind in reference.kinds
+    }
+
+    candidate_potentials = {
+        kind.element: kind.potential
+        for kind in candidate.kinds
+    }
+
+    if (
+        len(reference_potentials) != len(reference.kinds)
+        or len(candidate_potentials) != len(candidate.kinds)
+        or candidate_potentials != reference_potentials
+    ):
+        raise CP2KConvergenceGenerationError(
+            "Basis candidates must preserve element coverage "
+            "and pseudopotential assignments."
+        )
+
+
 def _candidate_config(
     *,
     base_config: CP2KInputConfig,
     parameter: ConvergenceParameter,
     value: Quantity | str | tuple[int, int, int] | None,
     project_name: str,
+    basis_candidates: dict[str, CP2KBasisPotentialConfig] | None = None,
 ) -> CP2KInputConfig:
     """Return a CP2K configuration for one convergence candidate."""
 
@@ -74,9 +118,25 @@ def _candidate_config(
         updates["k_points"] = value
 
     elif parameter == ConvergenceParameter.BASIS:
-        raise CP2KConvergenceGenerationError(
-            "CP2K basis-set convergence generation is not yet supported."
+        if basis_candidates is None:
+            raise CP2KConvergenceGenerationError(
+                "CP2K basis-set convergence generation is not yet supported "
+                "without explicit basis candidates."
+            )
+
+        if not isinstance(value, str) or value not in basis_candidates:
+            raise CP2KConvergenceGenerationError(
+                f"Unknown CP2K basis candidate: {value!r}"
+            )
+
+        candidate_basis = basis_candidates[value]
+
+        _validate_basis_candidate(
+            base_config=base_config,
+            candidate=candidate_basis,
         )
+
+        updates["basis_potential"] = candidate_basis
 
     else:
         raise CP2KConvergenceGenerationError(
@@ -94,6 +154,7 @@ def generate_cp2k_convergence_study(
     base_config: CP2KInputConfig,
     study: ConvergenceStudyDefinition,
     output_directory: str | Path,
+    basis_candidates: dict[str, CP2KBasisPotentialConfig] | None = None,
 ) -> tuple[Path, ...]:
     """Generate one portable CP2K package per convergence candidate."""
 
@@ -106,6 +167,7 @@ def generate_cp2k_convergence_study(
     output_existed_before = output_directory.exists()
 
     packages: list[Path] = []
+    candidate_configs: list[CP2KInputConfig] = []
 
     try:
         # Preserve the canonical periodic structure used by every
@@ -145,6 +207,7 @@ def generate_cp2k_convergence_study(
                 parameter=study.parameter,
                 value=candidate.value,
                 project_name=project_name,
+                basis_candidates=basis_candidates,
             )
 
             candidate_directory = (
@@ -158,15 +221,17 @@ def generate_cp2k_convergence_study(
             )
 
             packages.append(package)
+            candidate_configs.append(config)
 
         # Build the persistent manifest describing the generated study.
         manifest_candidates: list[
             ConvergenceManifestCandidate
         ] = []
 
-        for candidate, package in zip(
+        for candidate, package, config in zip(
             study.candidates,
             packages,
+            candidate_configs,
             strict=True,
         ):
             if candidate.value is None:
@@ -206,6 +271,11 @@ def generate_cp2k_convergence_study(
                     input_file=input_files[0].name,
                     coordinate_file=(
                         coordinate_files[0].name
+                    ),
+                    basis_potential=(
+                        config.basis_potential
+                        if study.parameter == ConvergenceParameter.BASIS
+                        else None
                     ),
                 )
             )

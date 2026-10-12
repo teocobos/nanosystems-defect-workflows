@@ -599,3 +599,203 @@ def test_rejects_input_output_identity_mismatch(
         ConvergenceEvidenceValidationError,
     ):
         validate(campaign)
+
+
+@pytest.fixture
+def basis_campaign(campaign):
+    """Synthetic evidence fixture; not a physical convergence result."""
+    root, directory, report_path = campaign
+
+    from nsdw.calculators.cp2k.generation_models import (
+        CP2KBasisPotentialConfig,
+        CP2KInputConfig,
+        CP2KKindConfig,
+    )
+
+    labels = ("400-Ry", "560-Ry", "700-Ry")
+    basis_names = ("DZVP-TEST", "TZVP-TEST", "TZV2P-TEST")
+
+    def basis_config(name):
+        return CP2KBasisPotentialConfig(
+            basis_set_file="BASIS_MOLOPT",
+            potential_file="GTH_POTENTIALS",
+            kinds=(
+                CP2KKindConfig(
+                    element="Si",
+                    basis_set=name,
+                    potential="GTH-PBE-q4",
+                ),
+                CP2KKindConfig(
+                    element="O",
+                    basis_set=name,
+                    potential="GTH-PBE-q6",
+                ),
+            ),
+        )
+
+    reference = CP2KInputConfig(
+        project_name="sio2-bulk",
+        cutoff_ry=400.0,
+        relative_cutoff_ry=60.0,
+        basis_potential=basis_config(basis_names[0]),
+    )
+
+    (directory / "base-config.json").write_text(
+        reference.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    manifest = json.loads(
+        (directory / "manifest.json").read_text(encoding="utf-8")
+    )
+    manifest["parameter"] = "basis"
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["parameter"] = "basis"
+
+    for index, (label, name) in enumerate(
+        zip(labels, basis_names, strict=True)
+    ):
+        candidate = manifest["candidates"][index]
+        candidate["value"] = name
+        candidate["basis_potential"] = basis_config(name).model_dump(
+            mode="json"
+        )
+
+        report["candidates"][index]["value"] = name
+
+        input_path = directory / label / "calculation.inp"
+        source = input_path.read_text(encoding="utf-8")
+
+        source = source.replace(
+            f"CUTOFF {400.0 if index == 0 else 560.0 if index == 1 else 700.0}",
+            "CUTOFF 400.0",
+        )
+
+        kinds = f"""    &KIND Si
+      ELEMENT Si
+      BASIS_SET {name}
+      POTENTIAL GTH-PBE-q4
+    &END KIND
+    &KIND O
+      ELEMENT O
+      BASIS_SET {name}
+      POTENTIAL GTH-PBE-q6
+    &END KIND
+"""
+
+        source = source.replace(
+            "  &DFT\n",
+            "  &DFT\n"
+            "    BASIS_SET_FILE_NAME BASIS_MOLOPT\n"
+            "    POTENTIAL_FILE_NAME GTH_POTENTIALS\n",
+            1,
+        )
+        source = source.replace(
+            "  &END SUBSYS",
+            kinds + "  &END SUBSYS",
+            1,
+        )
+
+        input_path.write_text(source, encoding="utf-8")
+
+    (directory / "manifest.json").write_text(
+        json.dumps(manifest, indent=2),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(report, indent=2),
+        encoding="utf-8",
+    )
+
+    return root, directory, report_path
+
+
+def validate_basis(campaign):
+    root, _, report_path = campaign
+    return validate_cp2k_calculation_evidence(
+        project_root=root,
+        report_path=report_path,
+        expected_parameter="basis",
+        expected_value="DZVP-TEST",
+    )
+
+
+def test_accepts_consistent_basis_evidence(basis_campaign):
+    report = validate_basis(basis_campaign)
+    assert report["selected_candidate_label"] == "400-Ry"
+
+
+def test_basis_evidence_rejects_missing_provenance(basis_campaign):
+    _, directory, _ = basis_campaign
+    path = directory / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["candidates"][1].pop("basis_potential")
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(
+        ConvergenceEvidenceValidationError,
+        match="Missing basis provenance",
+    ):
+        validate_basis(basis_campaign)
+
+
+def test_basis_evidence_rejects_wrong_basis_assignment(basis_campaign):
+    _, directory, _ = basis_campaign
+    path = directory / "560-Ry/calculation.inp"
+    text = path.read_text(encoding="utf-8")
+    assert "TZVP-TEST" in text
+    path.write_text(
+        text.replace("TZVP-TEST", "DZVP-TEST"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ConvergenceEvidenceValidationError,
+        match="basis/potential evidence",
+    ):
+        validate_basis(basis_campaign)
+
+
+def test_basis_evidence_rejects_joint_pseudopotential_change(
+    basis_campaign,
+):
+    _, directory, _ = basis_campaign
+    path = directory / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+
+    manifest["candidates"][1]["basis_potential"]["kinds"][0][
+        "potential"
+    ] = "GTH-BLYP-q4"
+
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    input_path = directory / "560-Ry/calculation.inp"
+    source = input_path.read_text(encoding="utf-8")
+    input_path.write_text(
+        source.replace("GTH-PBE-q4", "GTH-BLYP-q4"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ConvergenceEvidenceValidationError,
+        match="reference pseudopotentials",
+    ):
+        validate_basis(basis_campaign)
+
+
+def test_basis_evidence_rejects_changed_fixed_cutoff(basis_campaign):
+    _, directory, _ = basis_campaign
+    path = directory / "560-Ry/calculation.inp"
+    source = path.read_text(encoding="utf-8")
+    assert "CUTOFF 400.0" in source
+    path.write_text(
+        source.replace("CUTOFF 400.0", "CUTOFF 450.0"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ConvergenceEvidenceValidationError,
+        match="Non-varied CP2K settings",
+    ):
+        validate_basis(basis_campaign)

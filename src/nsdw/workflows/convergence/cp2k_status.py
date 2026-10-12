@@ -216,12 +216,41 @@ def _validate_fixed_configuration(
             scf.energy_gap,
         )
 
-    basis = base_config.basis_potential
+    reference_basis = base_config.basis_potential
 
-    if basis is None:
+    if reference_basis is None:
         raise ValueError(
             "base-config.json has no basis/potential configuration."
         )
+
+    if parameter == ConvergenceParameter.BASIS:
+        if not isinstance(candidate.value, str):
+            raise ValueError(
+                "Basis convergence requires a string candidate value."
+            )
+
+        basis = candidate.basis_potential
+
+        if basis is None:
+            raise ValueError(
+                "Basis candidate is missing manifest basis provenance."
+            )
+
+        from nsdw.workflows.convergence.cp2k_generation import (
+            _validate_basis_candidate,
+        )
+
+        _validate_basis_candidate(
+            base_config=base_config,
+            candidate=basis,
+        )
+    else:
+        if candidate.basis_potential is not None:
+            raise ValueError(
+                "Unexpected basis provenance in a non-basis campaign."
+            )
+
+        basis = reference_basis
 
     require_equal(
         "basis_set_file",

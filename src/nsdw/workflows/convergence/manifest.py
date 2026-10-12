@@ -6,6 +6,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nsdw.calculators.cp2k.generation_models import (
+    CP2KBasisPotentialConfig,
+)
 from nsdw.models.quantity import Quantity
 
 from nsdw.workflows.convergence.models import (
@@ -30,6 +33,7 @@ class ConvergenceManifestCandidate(BaseModel):
     directory: str = Field(min_length=1)
     input_file: str = Field(min_length=1)
     coordinate_file: str = Field(min_length=1)
+    basis_potential: CP2KBasisPotentialConfig | None = None
 
 
 class ConvergenceStudyManifest(BaseModel):
@@ -57,7 +61,7 @@ def write_convergence_manifest(
     path = Path(path)
 
     path.write_text(
-        manifest.model_dump_json(indent=2) + "\n",
+        manifest.model_dump_json(indent=2, exclude_none=True) + "\n",
         encoding="utf-8",
     )
 

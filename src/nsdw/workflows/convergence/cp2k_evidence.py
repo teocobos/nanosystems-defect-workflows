@@ -111,6 +111,12 @@ def _input_signature(parsed: Any, parameter: str) -> tuple:
             field for field in fields if field != "k_points"
         )
 
+    if parameter == "basis":
+        fields = tuple(
+            field for field in fields
+            if field not in ("kinds", "basis_set_file")
+        )
+
     return tuple(
         (field, getattr(parsed, field))
         for field in fields
@@ -122,7 +128,7 @@ def validate_cp2k_calculation_evidence(
     project_root: str | Path,
     report_path: str | Path,
     expected_parameter: str,
-    expected_value: float | tuple[int, int, int],
+    expected_value: float | tuple[int, int, int] | str,
     expected_structure_hash: str | None = None,
     expected_n_atoms: int | None = None,
 ) -> dict[str, Any]:
@@ -173,6 +179,32 @@ def validate_cp2k_calculation_evidence(
         raise ConvergenceEvidenceValidationError(
             "Canonical structure differs from convergence report."
         )
+
+    reference_basis = None
+
+    if manifest.parameter.value == "basis":
+        from nsdw.calculators.cp2k.generation_models import (
+            CP2KInputConfig,
+        )
+
+        config_path = _file_within(
+            root, campaign / "base-config.json"
+        )
+
+        try:
+            base_config = CP2KInputConfig.model_validate_json(
+                config_path.read_text(encoding="utf-8")
+            )
+            reference_basis = base_config.basis_potential
+        except Exception as exc:
+            raise ConvergenceEvidenceValidationError(
+                "Cannot validate reference basis configuration."
+            ) from exc
+
+        if reference_basis is None:
+            raise ConvergenceEvidenceValidationError(
+                "Missing reference basis/potential configuration."
+            )
 
     baseline_signature = None
     used_directories: set[Path] = set()
@@ -252,12 +284,86 @@ def validate_cp2k_calculation_evidence(
         elif parameter == "kpoints":
             actual = parsed_input.k_points
             expected = tuple(candidate.value)
+        elif parameter == "basis":
+            if not isinstance(candidate.value, str):
+                raise ConvergenceEvidenceValidationError(
+                    "Basis candidate value must be a string."
+                )
+
+            basis = candidate.basis_potential
+
+            if basis is None:
+                raise ConvergenceEvidenceValidationError(
+                    f"Missing basis provenance for {candidate.label}."
+                )
+
+            if basis.potential_file != reference_basis.potential_file:
+                raise ConvergenceEvidenceValidationError(
+                    "Basis candidate changes reference pseudopotential file."
+                )
+
+            reference_potentials = {
+                kind.element: kind.potential
+                for kind in reference_basis.kinds
+            }
+
+            candidate_potentials = {
+                kind.element: kind.potential
+                for kind in basis.kinds
+            }
+
+            if (
+                len(reference_potentials) != len(reference_basis.kinds)
+                or len(candidate_potentials) != len(basis.kinds)
+                or candidate_potentials != reference_potentials
+            ):
+                raise ConvergenceEvidenceValidationError(
+                    "Basis candidate changes reference pseudopotentials."
+                )
+
+            expected_kinds = {
+                kind.element: (kind.basis_set, kind.potential)
+                for kind in basis.kinds
+            }
+
+            actual_kinds = {
+                kind.element: (kind.basis_set, kind.potential)
+                for kind in parsed_input.kinds
+            }
+
+            if len(expected_kinds) != len(basis.kinds):
+                raise ConvergenceEvidenceValidationError(
+                    "Duplicate elements in basis provenance."
+                )
+
+            if len(actual_kinds) != len(parsed_input.kinds):
+                raise ConvergenceEvidenceValidationError(
+                    "Duplicate element kinds in CP2K input."
+                )
+
+            if (
+                parsed_input.basis_set_file != basis.basis_set_file
+                or parsed_input.potential_file != basis.potential_file
+                or actual_kinds != expected_kinds
+            ):
+                raise ConvergenceEvidenceValidationError(
+                    f"CP2K basis/potential evidence differs "
+                    f"from manifest for {candidate.label}."
+                )
+
+            actual = candidate.value
+            expected = candidate.value
         else:
             raise ConvergenceEvidenceValidationError(
                 f"Unsupported CP2K evidence parameter: {parameter}"
             )
 
-        if parameter == "kpoints":
+        if parameter == "basis":
+            if actual != expected:
+                raise ConvergenceEvidenceValidationError(
+                    f"Incorrect basis candidate for {candidate.label}."
+                )
+        elif parameter == "kpoints":
             if actual != expected:
                 raise ConvergenceEvidenceValidationError(
                     f"Incorrect k-point mesh for {candidate.label}."

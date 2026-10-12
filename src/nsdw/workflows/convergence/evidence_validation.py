@@ -77,7 +77,7 @@ def validate_convergence_evidence(
     project_root: str | Path,
     report_path: str | Path,
     expected_parameter: str,
-    expected_value: float | tuple[int, int, int],
+    expected_value: float | tuple[int, int, int] | str,
     expected_structure_hash: str | None = None,
     expected_n_atoms: int | None = None,
 ) -> dict[str, Any]:
@@ -260,7 +260,16 @@ def validate_convergence_evidence(
     candidate = selected[0]
     value = candidate["value"]
 
-    if expected_parameter == "kpoints":
+    if expected_parameter == "basis":
+        if (
+            not isinstance(expected_value, str)
+            or not isinstance(value, str)
+            or value != expected_value
+        ):
+            raise ConvergenceEvidenceValidationError(
+                "Selected basis-set candidate mismatch."
+            )
+    elif expected_parameter == "kpoints":
         expected = list(expected_value)
         if (
             not isinstance(value, list)

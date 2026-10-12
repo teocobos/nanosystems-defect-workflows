@@ -478,3 +478,152 @@ def test_completed_archer2_cutoff_campaign(tmp_path):
     ]
 
     assert result.all_completed
+
+
+def _generated_basis_campaign(tmp_path):
+    from pymatgen.core import Lattice, Structure
+
+    from nsdw.calculators.cp2k.generation_models import (
+        CP2KBasisPotentialConfig,
+        CP2KInputConfig,
+        CP2KKindConfig,
+    )
+    from nsdw.workflows.convergence.cp2k_generation import (
+        generate_cp2k_convergence_study,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceCandidate,
+        ConvergenceParameter,
+        ConvergenceStudyDefinition,
+    )
+
+    reference = CP2KBasisPotentialConfig(
+        basis_set_file="BASIS_MOLOPT",
+        potential_file="GTH_POTENTIALS",
+        kinds=(
+            CP2KKindConfig(
+                element="O",
+                basis_set="DZVP-MOLOPT-GTH-q6",
+                potential="GTH-PBE-q6",
+            ),
+        ),
+    )
+
+    alternative = reference.model_copy(
+        update={
+            "kinds": (
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="TZVP-MOLOPT-GTH-q6",
+                    potential="GTH-PBE-q6",
+                ),
+            ),
+        }
+    )
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.BASIS,
+        candidates=[
+            ConvergenceCandidate(
+                label="dzvp",
+                order=0,
+                value="dzvp",
+            ),
+            ConvergenceCandidate(
+                label="tzvp",
+                order=1,
+                value="tzvp",
+            ),
+        ],
+    )
+
+    campaign = tmp_path / "basis-campaign"
+
+    generate_cp2k_convergence_study(
+        structure=Structure(
+            Lattice.cubic(5.0),
+            ["O"],
+            [[0, 0, 0]],
+        ),
+        base_config=CP2KInputConfig(
+            project_name="basis-test",
+            run_type="ENERGY",
+            basis_potential=reference,
+        ),
+        study=study,
+        output_directory=campaign,
+        basis_candidates={
+            "dzvp": reference,
+            "tzvp": alternative,
+        },
+    )
+
+    return campaign
+
+
+def test_generated_basis_campaign_candidates_are_pending(tmp_path):
+    campaign = _generated_basis_campaign(tmp_path)
+
+    result = inspect_cp2k_convergence_campaign(campaign)
+
+    assert len(result.candidates) == 2
+    assert all(
+        candidate.state == CP2KCandidateState.PENDING
+        for candidate in result.candidates
+    )
+
+
+def test_basis_campaign_rejects_missing_candidate_provenance(tmp_path):
+    import json
+
+    campaign = _generated_basis_campaign(tmp_path)
+    manifest_path = campaign / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+
+    manifest["candidates"][1].pop("basis_potential")
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = inspect_cp2k_convergence_campaign(campaign)
+
+    assert result.candidates[1].state == CP2KCandidateState.INVALID
+    assert "provenance" in result.candidates[1].reason.lower()
+
+
+def test_basis_campaign_rejects_unexpected_basis_assignment(tmp_path):
+    campaign = _generated_basis_campaign(tmp_path)
+
+    input_path = next((campaign / "tzvp").glob("*.inp"))
+    source = input_path.read_text()
+
+    assert "TZVP-MOLOPT-GTH-q6" in source
+
+    input_path.write_text(
+        source.replace(
+            "TZVP-MOLOPT-GTH-q6",
+            "DZVP-MOLOPT-GTH-q6",
+        )
+    )
+
+    result = inspect_cp2k_convergence_campaign(campaign)
+
+    assert result.candidates[1].state == CP2KCandidateState.INVALID
+    assert "basis" in result.candidates[1].reason.lower()
+
+
+def test_basis_campaign_rejects_changed_pseudopotential_provenance(tmp_path):
+    import json
+
+    campaign = _generated_basis_campaign(tmp_path)
+    manifest_path = campaign / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+
+    manifest["candidates"][1]["basis_potential"]["kinds"][0][
+        "potential"
+    ] = "GTH-BLYP-q6"
+
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = inspect_cp2k_convergence_campaign(campaign)
+
+    assert result.candidates[1].state == CP2KCandidateState.INVALID
+    assert "pseudopotential" in result.candidates[1].reason.lower()

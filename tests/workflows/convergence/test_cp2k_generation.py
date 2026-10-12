@@ -625,3 +625,265 @@ def test_generation_preserves_existing_base_config(
         )
 
     assert config_path.read_text(encoding="utf-8") == original_content
+
+
+def test_generate_basis_study_with_explicit_candidates(
+    tmp_path: Path,
+) -> None:
+    base = _base_config()
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.BASIS,
+        candidates=[
+            ConvergenceCandidate(
+                label="dzvp",
+                order=0,
+                value="dzvp",
+            ),
+            ConvergenceCandidate(
+                label="tzvp",
+                order=1,
+                value="tzvp",
+            ),
+        ],
+    )
+
+    dzvp = base.basis_potential
+    assert dzvp is not None
+
+    tzvp = dzvp.model_copy(
+        update={
+            "kinds": (
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="TZVP-MOLOPT-GTH",
+                    potential="GTH-PBE",
+                ),
+            ),
+        }
+    )
+
+    directory = tmp_path / "basis-study"
+
+    packages = generate_cp2k_convergence_study(
+        structure=_structure(),
+        base_config=base,
+        study=study,
+        output_directory=directory,
+        basis_candidates={
+            "dzvp": dzvp,
+            "tzvp": tzvp,
+        },
+    )
+
+    assert len(packages) == 2
+
+    dzvp_input = next(
+        (directory / "dzvp").glob("*.inp")
+    ).read_text()
+
+    tzvp_input = next(
+        (directory / "tzvp").glob("*.inp")
+    ).read_text()
+
+    assert "BASIS_SET DZVP-MOLOPT-SR-GTH" in dzvp_input
+    assert "BASIS_SET TZVP-MOLOPT-GTH" in tzvp_input
+
+    for text in (dzvp_input, tzvp_input):
+        assert "POTENTIAL GTH-PBE" in text
+        assert "CUTOFF 600" in text
+        assert "REL_CUTOFF 60" in text
+
+    assert (directory / "manifest.json").is_file()
+    assert (directory / "base-config.json").is_file()
+
+
+def test_basis_study_rejects_unknown_candidate(
+    tmp_path: Path,
+) -> None:
+    base = _base_config()
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.BASIS,
+        candidates=[
+            ConvergenceCandidate(
+                label="dzvp",
+                order=0,
+                value="dzvp",
+            ),
+            ConvergenceCandidate(
+                label="missing",
+                order=1,
+                value="missing",
+            ),
+        ],
+    )
+
+    directory = tmp_path / "basis-study"
+
+    with pytest.raises(
+        CP2KConvergenceGenerationError,
+        match="Unknown CP2K basis candidate",
+    ):
+        generate_cp2k_convergence_study(
+            structure=_structure(),
+            base_config=base,
+            study=study,
+            output_directory=directory,
+            basis_candidates={
+                "dzvp": base.basis_potential,
+            },
+        )
+
+    assert not directory.exists()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "potential_file",
+        "potential_assignment",
+        "element_coverage",
+    ],
+)
+def test_basis_study_rejects_pseudopotential_changes(
+    tmp_path: Path,
+    change: str,
+) -> None:
+    base = _base_config()
+    reference = base.basis_potential
+    assert reference is not None
+
+    if change == "potential_file":
+        altered = reference.model_copy(
+            update={"potential_file": "DIFFERENT_POTENTIAL"}
+        )
+    elif change == "potential_assignment":
+        altered = reference.model_copy(
+            update={
+                "kinds": (
+                    CP2KKindConfig(
+                        element="O",
+                        basis_set="TZVP-MOLOPT-GTH",
+                        potential="DIFFERENT-POTENTIAL",
+                    ),
+                )
+            }
+        )
+    else:
+        altered = reference.model_copy(
+            update={"kinds": ()}
+        )
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.BASIS,
+        candidates=[
+            ConvergenceCandidate(
+                label="reference",
+                order=0,
+                value="reference",
+            ),
+            ConvergenceCandidate(
+                label="altered",
+                order=1,
+                value="altered",
+            ),
+        ],
+    )
+
+    directory = tmp_path / "basis-study"
+
+    with pytest.raises(
+        CP2KConvergenceGenerationError,
+        match="must preserve",
+    ):
+        generate_cp2k_convergence_study(
+            structure=_structure(),
+            base_config=base,
+            study=study,
+            output_directory=directory,
+            basis_candidates={
+                "reference": reference,
+                "altered": altered,
+            },
+        )
+
+    assert not directory.exists()
+
+
+def test_basis_manifest_persists_candidate_configurations(
+    tmp_path: Path,
+) -> None:
+    base = _base_config()
+    reference = base.basis_potential
+    assert reference is not None
+
+    alternative = reference.model_copy(
+        update={
+            "kinds": (
+                CP2KKindConfig(
+                    element="O",
+                    basis_set="TZVP-MOLOPT-GTH",
+                    potential="GTH-PBE",
+                ),
+            ),
+        }
+    )
+
+    study = ConvergenceStudyDefinition(
+        parameter=ConvergenceParameter.BASIS,
+        candidates=[
+            ConvergenceCandidate(
+                label="dzvp",
+                order=0,
+                value="dzvp",
+            ),
+            ConvergenceCandidate(
+                label="tzvp",
+                order=1,
+                value="tzvp",
+            ),
+        ],
+    )
+
+    directory = tmp_path / "basis-study"
+
+    generate_cp2k_convergence_study(
+        structure=_structure(),
+        base_config=base,
+        study=study,
+        output_directory=directory,
+        basis_candidates={
+            "dzvp": reference,
+            "tzvp": alternative,
+        },
+    )
+
+    from nsdw.workflows.convergence.manifest import (
+        load_convergence_manifest,
+    )
+
+    manifest = load_convergence_manifest(
+        directory / "manifest.json"
+    )
+
+    assert manifest.parameter == ConvergenceParameter.BASIS
+
+    assert (
+        manifest.candidates[0].basis_potential
+        == reference
+    )
+
+    assert (
+        manifest.candidates[1].basis_potential
+        == alternative
+    )
+
+    stored = json.loads(
+        (directory / "manifest.json").read_text()
+    )
+
+    assert (
+        stored["candidates"][1]["basis_potential"]["kinds"][0]["basis_set"]
+        == "TZVP-MOLOPT-GTH"
+    )
