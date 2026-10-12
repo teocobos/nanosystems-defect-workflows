@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -202,6 +203,7 @@ def generate_cp2k_convergence_study(
     study: ConvergenceStudyDefinition,
     output_directory: str | Path,
     basis_candidates: dict[str, CP2KBasisPotentialConfig] | None = None,
+    kpoint_planner_provenance: dict | None = None,
 ) -> tuple[Path, ...]:
     """Generate one portable CP2K package per convergence candidate."""
 
@@ -210,6 +212,38 @@ def generate_cp2k_convergence_study(
         .expanduser()
         .resolve()
     )
+
+    # Validate optional provenance before creating any campaign files.
+    if kpoint_planner_provenance is not None:
+        if study.parameter != ConvergenceParameter.KPOINTS:
+            raise CP2KConvergenceGenerationError(
+                "K-point planner provenance requires a k-point study."
+            )
+
+        if not isinstance(kpoint_planner_provenance, dict):
+            raise CP2KConvergenceGenerationError(
+                "K-point planner provenance must be a dictionary."
+            )
+
+        expected_meshes = [
+            list(candidate.value)
+            for candidate in study.candidates
+        ]
+
+        if kpoint_planner_provenance.get("meshes") != expected_meshes:
+            raise CP2KConvergenceGenerationError(
+                "K-point planner provenance does not match candidates."
+            )
+
+        try:
+            json.dumps(
+                kpoint_planner_provenance,
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise CP2KConvergenceGenerationError(
+                "K-point planner provenance is not valid finite JSON."
+            ) from exc
 
     output_existed_before = output_directory.exists()
 
@@ -335,6 +369,31 @@ def generate_cp2k_convergence_study(
                 manifest_candidates
             ),
         )
+
+        if kpoint_planner_provenance is not None:
+            if study.parameter != ConvergenceParameter.KPOINTS:
+                raise CP2KConvergenceGenerationError(
+                    "K-point planner provenance requires a k-point study."
+                )
+
+            expected_meshes = [
+                list(candidate.value)
+                for candidate in study.candidates
+            ]
+            if kpoint_planner_provenance.get("meshes") != expected_meshes:
+                raise CP2KConvergenceGenerationError(
+                    "K-point planner provenance does not match candidates."
+                )
+
+            provenance_path = output_directory / "kpoint-planner.json"
+            with provenance_path.open("x", encoding="utf-8") as handle:
+                json.dump(
+                    kpoint_planner_provenance,
+                    handle,
+                    indent=2,
+                    allow_nan=False,
+                )
+                handle.write("\n")
 
         write_convergence_manifest(
             manifest=manifest,

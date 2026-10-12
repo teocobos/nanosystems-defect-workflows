@@ -77,6 +77,7 @@ from nsdw.calculators.cp2k.presets import (
     get_basis_potential_preset,
 )
 from nsdw.models.quantity import Quantity
+from nsdw.workflows.convergence.kpoint_meshes import generate_automatic_mesh_sequence
 from nsdw.workflows.convergence.cp2k_generation import (
     CP2KConvergenceGenerationError,
     generate_cp2k_convergence_study,
@@ -1509,16 +1510,38 @@ def workflow_convergence_generate(
         ...,
         help="Input structure file.",
     ),
-    parameter: Literal["cutoff"] = typer.Option(
+    parameter: Literal["cutoff", "relative_cutoff", "kpoints"] = typer.Option(
         "cutoff",
         "--parameter",
         "-p",
         help="Convergence parameter.",
     ),
     values: list[float] = typer.Option(
-        ...,
+        [],
         "--values",
-        help="Candidate convergence value. Repeat for multiple values.",
+        help="Candidate cutoff/relative-cutoff value in Ry. Repeat as needed.",
+    ),
+    meshes: list[str] = typer.Option(
+        [],
+        "--mesh",
+        help="K-point mesh such as 2x2x2. Repeat in increasing density order.",
+    ),
+    auto: bool = typer.Option(
+        False,
+        "--auto",
+        help="Automatically generate reciprocal-lattice-based k-point meshes.",
+    ),
+    cutoff: float = typer.Option(
+        600.0,
+        "--cutoff",
+        min=0.0,
+        help="Fixed CP2K plane-wave cutoff in Ry.",
+    ),
+    relative_cutoff: float = typer.Option(
+        60.0,
+        "--relative-cutoff",
+        min=0.0,
+        help="Fixed CP2K relative cutoff in Ry.",
     ),
     preset: str = typer.Option(
         ...,
@@ -1570,23 +1593,90 @@ def workflow_convergence_generate(
             preset,
         )
 
+        if parameter == "kpoints":
+            if values:
+                raise ValueError(
+                    "Use --mesh rather than --values for k-point convergence."
+                )
+            if auto and meshes:
+                raise ValueError(
+                    "Use either --auto or --mesh, not both."
+                )
+
+            if auto:
+                planner_settings = {
+                    "number_of_meshes": 4,
+                    "initial_spacing_inv_angstrom": 1.5,
+                    "refinement_factor": 0.7,
+                    "max_mesh_points": 1000,
+                }
+                parsed_meshes = list(
+                    generate_automatic_mesh_sequence(
+                        structure,
+                        **planner_settings,
+                    )
+                )
+            else:
+                if len(meshes) < 2:
+                    raise ValueError(
+                        "K-point convergence requires --auto or "
+                        "at least two --mesh values."
+                    )
+
+                parsed_meshes = []
+                for raw_mesh in meshes:
+                    parts = raw_mesh.lower().split("x")
+                    if len(parts) != 3 or not all(
+                        part.isdecimal() and int(part) > 0
+                        for part in parts
+                    ):
+                        raise ValueError(
+                            f"Invalid k-point mesh {raw_mesh!r}; expected NxNxN."
+                        )
+                    parsed_meshes.append(tuple(map(int, parts)))
+
+            candidates = [
+                ConvergenceCandidate(
+                    label="x".join(map(str, mesh)),
+                    order=order,
+                    value=mesh,
+                )
+                for order, mesh in enumerate(parsed_meshes)
+            ]
+        else:
+            if auto or meshes:
+                raise ValueError(
+                    "--auto and --mesh are only supported "
+                    "for k-point convergence."
+                )
+            if len(values) < 2:
+                raise ValueError(
+                    "Convergence requires at least two --values options."
+                )
+
+            candidates = [
+                ConvergenceCandidate(
+                    label=f"{value:g}-Ry",
+                    order=order,
+                    value=Quantity(value=value, unit="Ry"),
+                )
+                for order, value in enumerate(values)
+            ]
+
         base_config = CP2KInputConfig(
             project_name=structure_file.stem,
             run_type="ENERGY",
+            cutoff_ry=cutoff,
+            relative_cutoff_ry=relative_cutoff,
             basis_potential=basis_potential,
-        )
-
-        candidates = [
-            ConvergenceCandidate(
-                label=f"{value:g}-Ry",
-                order=order,
-                value=Quantity(
-                    value=value,
-                    unit="Ry",
+            scf={
+                "solver": (
+                    "DIAGONALIZATION"
+                    if parameter == "kpoints"
+                    else "OT"
                 ),
-            )
-            for order, value in enumerate(values)
-        ]
+            },
+        )
 
         study = ConvergenceStudyDefinition(
             parameter=ConvergenceParameter(parameter),
@@ -1596,11 +1686,29 @@ def workflow_convergence_generate(
             },
         )
 
+        planner_provenance = None
+        if parameter == "kpoints" and auto:
+            planner_provenance = {
+                "schema_version": 1,
+                "mode": "automatic",
+                "reciprocal_convention": "2pi-included",
+                "reciprocal_lengths_inv_angstrom": list(
+                    structure.lattice.reciprocal_lattice.abc
+                ),
+                **planner_settings,
+                "meshes": [
+                    list(candidate.value)
+                    for candidate in study.candidates
+                ],
+                "energy_tolerance_ev_per_atom": tolerance,
+            }
+
         packages = generate_cp2k_convergence_study(
             structure=structure,
             base_config=base_config,
             study=study,
             output_directory=output_directory,
+            kpoint_planner_provenance=planner_provenance,
         )
 
     except (
