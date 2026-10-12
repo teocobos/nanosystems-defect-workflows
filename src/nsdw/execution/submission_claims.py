@@ -78,9 +78,17 @@ def create_submission_claim(
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+
+        directory_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
     except OSError as exc:
         raise SubmissionClaimError(
-            "Submission claim write failed; manual recovery required."
+            "Submission claim persistence failed; "
+            "manual recovery required."
         ) from exc
 
     return destination
@@ -90,7 +98,7 @@ def inspect_submission_claim(
     *,
     candidate_directory: Path,
     filename: str = "submission-claim.json",
-) -> SubmissionClaim | None:
+) -> SubmissionClaim | TokenisedSubmissionClaim | None:
     """Read a claim without modifying it.
 
     Missing claims return None. Malformed or unsafe claims raise
@@ -108,14 +116,21 @@ def inspect_submission_claim(
             "Claim filename must be a simple filename."
         )
 
-    path = (directory / filename).resolve()
+    raw_path = directory / filename
+
+    if raw_path.is_symlink():
+        raise SubmissionClaimError(
+            "Submission claim symlink is not trusted."
+        )
+
+    path = raw_path.resolve()
 
     if not path.is_relative_to(directory):
         raise SubmissionClaimError(
             "Claim path escapes candidate directory."
         )
 
-    if not path.exists() and not path.is_symlink():
+    if not path.exists():
         return None
 
     if not path.is_file():
@@ -124,10 +139,57 @@ def inspect_submission_claim(
         )
 
     try:
-        return SubmissionClaim.model_validate_json(
-            path.read_text(encoding="utf-8")
-        )
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+        if not isinstance(data, dict):
+            raise ValueError("Claim must be a JSON object.")
+
+        version = data.get("schema_version")
+
+        if version == 1 and type(version) is int:
+            return SubmissionClaim.model_validate(data)
+
+        if version == 2 and type(version) is int:
+            return TokenisedSubmissionClaim.model_validate(data)
+
+        raise ValueError("Unsupported submission claim schema.")
+
     except (ValueError, OSError) as exc:
         raise SubmissionClaimError(
             "Submission claim is malformed or unreadable."
         ) from exc
+
+
+class TokenisedSubmissionClaim(BaseModel):
+    """Version-2 claim with a unique scheduler submission token."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[2] = 2
+    state: Literal["claimed"] = "claimed"
+
+    target: str = Field(min_length=1)
+    calculation_id: str = Field(min_length=1)
+    input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    submission_token: str = Field(
+        pattern=r"^[0-9a-f]{32}$"
+    )
+
+
+def generate_submission_token() -> str:
+    """Generate a cryptographically random submission identifier."""
+    import secrets
+
+    return secrets.token_hex(16)
+
+
+def slurm_name_for_token(token: str) -> str:
+    """Return the deterministic SLURM name for a submission token."""
+    import re
+
+    if re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        raise ValueError(
+            "Submission token must be 32 lowercase hex characters."
+        )
+
+    return f"nsdw-{token}"

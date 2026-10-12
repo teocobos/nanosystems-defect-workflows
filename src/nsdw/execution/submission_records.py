@@ -67,7 +67,14 @@ def load_slurm_submission_record(
             "Record and input paths must be relative."
         )
 
-    record = (directory / record_path).resolve()
+    raw_record = directory / record_path
+
+    if raw_record.is_symlink():
+        raise SubmissionRecordError(
+            "Submission record symlink is not trusted."
+        )
+
+    record = raw_record.resolve()
     input_path = (directory / input_file).resolve()
 
     for path in (record, input_path):
@@ -76,8 +83,13 @@ def load_slurm_submission_record(
                 "Submission record or input escapes candidate directory."
             )
 
-    if not record.is_file():
+    if not record.exists():
         return None
+
+    if not record.is_file():
+        raise SubmissionRecordError(
+            "Submission record is not a regular file."
+        )
 
     try:
         data = SlurmSubmissionRecord.model_validate_json(
@@ -116,3 +128,127 @@ def load_slurm_submission_record(
         )
 
     return data
+
+
+def publish_slurm_submission_record(
+    *,
+    candidate_directory: Path,
+    record: SlurmSubmissionRecord,
+    filename: str = "submission.json",
+) -> Path:
+    """Exclusively publish an accepted SLURM job record.
+
+    Requires an existing, matching submission claim.
+    Never overwrites existing submission evidence.
+    """
+    import os
+
+    from nsdw.execution.submission_claims import (
+        SubmissionClaimError,
+        inspect_submission_claim,
+    )
+
+    directory = Path(candidate_directory).resolve()
+
+    if not directory.is_dir():
+        raise SubmissionRecordError(
+            "Candidate directory does not exist."
+        )
+
+    if (
+        not filename
+        or Path(filename).name != filename
+        or filename in {".", ".."}
+    ):
+        raise SubmissionRecordError(
+            "Record filename must be a simple filename."
+        )
+
+    if (
+        Path(record.input_file).is_absolute()
+        or Path(record.input_file).name != record.input_file
+    ):
+        raise SubmissionRecordError(
+            "Record input filename must be a simple filename."
+        )
+
+    input_path = (directory / record.input_file).resolve()
+
+    if not input_path.is_relative_to(directory):
+        raise SubmissionRecordError(
+            "Submission input escapes candidate directory."
+        )
+
+    try:
+        claim = inspect_submission_claim(
+            candidate_directory=directory,
+        )
+    except SubmissionClaimError as exc:
+        raise SubmissionRecordError(
+            f"Untrusted submission claim: {exc}"
+        ) from exc
+
+    if claim is None:
+        raise SubmissionRecordError(
+            "Cannot publish submission without an existing claim."
+        )
+
+    if (
+        claim.target != record.target
+        or claim.calculation_id != record.calculation_id
+        or claim.input_sha256 != record.input_sha256
+    ):
+        raise SubmissionRecordError(
+            "Submission claim and record identity mismatch."
+        )
+
+    try:
+        actual_hash = sha256_file(input_path)
+    except OSError as exc:
+        raise SubmissionRecordError(
+            "Cannot read submission input file."
+        ) from exc
+
+    if actual_hash != record.input_sha256:
+        raise SubmissionRecordError(
+            "Submission input SHA-256 mismatch."
+        )
+
+    destination = directory / filename
+    payload = (record.model_dump_json(indent=2) + "\n").encode("utf-8")
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    try:
+        fd = os.open(destination, flags, 0o600)
+    except FileExistsError as exc:
+        raise SubmissionRecordError(
+            "Submission record already exists; refusing overwrite."
+        ) from exc
+    except OSError as exc:
+        raise SubmissionRecordError(
+            f"Cannot create submission record: {exc}"
+        ) from exc
+
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        directory_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+    except OSError as exc:
+        raise SubmissionRecordError(
+            "Submission record persistence failed; "
+            "manual reconciliation required."
+        ) from exc
+
+    return destination
