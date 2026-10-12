@@ -193,13 +193,13 @@ def _validate_fixed_configuration(
     require_equal("scf_guess", parsed.scf_guess, scf.scf_guess)
     require_float("eps_scf", parsed.eps_scf, scf.eps_scf)
     require_equal("max_scf", parsed.max_scf, scf.max_scf)
-    require_equal(
-        "outer_scf_max",
-        parsed.outer_scf_max,
-        scf.outer_scf_max,
-    )
 
     if scf.solver == "OT":
+        require_equal(
+            "outer_scf_max",
+            parsed.outer_scf_max,
+            scf.outer_scf_max,
+        )
         require_equal(
             "ot_minimizer",
             parsed.ot_minimizer,

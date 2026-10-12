@@ -631,3 +631,69 @@ def test_basis_campaign_rejects_changed_pseudopotential_provenance(tmp_path):
 
     assert result.candidates[1].state == CP2KCandidateState.INVALID
     assert "pseudopotential" in result.candidates[1].reason.lower()
+
+
+def test_diagonalization_status_ignores_inactive_outer_scf():
+    """Status validation accepts absent OUTER_SCF for diagonalisation."""
+    from types import SimpleNamespace
+
+    from nsdw.calculators.cp2k.generation_models import (
+        CP2KSCFConfig,
+    )
+    from nsdw.workflows.convergence.cp2k_status import (
+        _validate_fixed_configuration,
+    )
+    from nsdw.workflows.convergence.models import (
+        ConvergenceParameter,
+    )
+
+    parsed = SimpleNamespace(
+        project_name="test-2x2x2",
+        run_type=SimpleNamespace(value="ENERGY"),
+        charge=0,
+        multiplicity=1,
+        cutoff_ry=400.0,
+        relative_cutoff_ry=30.0,
+        k_points=None,
+        xc_functional="PBE",
+        scf_solver="DIAGONALIZATION",
+        scf_guess="ATOMIC",
+        eps_scf=1e-6,
+        max_scf=100,
+        outer_scf_max=None,
+    )
+
+    base = SimpleNamespace(
+        project_name="test",
+        run_type="ENERGY",
+        charge=0,
+        multiplicity=1,
+        cutoff_ry=400.0,
+        relative_cutoff_ry=30.0,
+        k_points=None,
+        functional=SimpleNamespace(value="PBE"),
+        scf=CP2KSCFConfig(solver="DIAGONALIZATION"),
+        basis_potential=None,
+    )
+
+    candidate = SimpleNamespace(
+        label="2x2x2",
+        value=(2, 2, 2),
+        basis_potential=None,
+    )
+
+    # A complete basis fixture is required to reach the end of
+    # _validate_fixed_configuration. This test specifically checks
+    # that the SCF comparison no longer raises the original error.
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="basis/potential configuration",
+    ):
+        _validate_fixed_configuration(
+            parsed,
+            candidate,
+            ConvergenceParameter.KPOINTS,
+            base,
+        )
