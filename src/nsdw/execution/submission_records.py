@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -51,7 +52,7 @@ def load_slurm_submission_record(
     calculation_id: str,
     target: str,
     input_file: Path,
-) -> SlurmSubmissionRecord | None:
+) -> SlurmSubmissionRecord | TokenisedSlurmSubmissionRecord | None:
     """Load a record and verify its calculation identity.
 
     A missing record returns None, which must never be
@@ -92,9 +93,22 @@ def load_slurm_submission_record(
         )
 
     try:
-        data = SlurmSubmissionRecord.model_validate_json(
-            record.read_text(encoding="utf-8")
-        )
+        payload = json.loads(record.read_text(encoding="utf-8"))
+
+        if not isinstance(payload, dict):
+            raise ValueError("Submission record must be a JSON object.")
+
+        version = payload.get("schema_version")
+
+        if type(version) is not int:
+            raise ValueError("Invalid submission record schema version.")
+
+        if version == 1:
+            data = SlurmSubmissionRecord.model_validate(payload)
+        elif version == 2:
+            data = TokenisedSlurmSubmissionRecord.model_validate(payload)
+        else:
+            raise ValueError("Unsupported submission record schema version.")
     except (ValueError, OSError) as exc:
         raise SubmissionRecordError(
             "Invalid SLURM submission record."
@@ -133,7 +147,7 @@ def load_slurm_submission_record(
 def publish_slurm_submission_record(
     *,
     candidate_directory: Path,
-    record: SlurmSubmissionRecord,
+    record: SlurmSubmissionRecord | TokenisedSlurmSubmissionRecord,
     filename: str = "submission.json",
 ) -> Path:
     """Exclusively publish an accepted SLURM job record.
@@ -197,10 +211,20 @@ def publish_slurm_submission_record(
         claim.target != record.target
         or claim.calculation_id != record.calculation_id
         or claim.input_sha256 != record.input_sha256
+        or claim.schema_version != record.schema_version
     ):
         raise SubmissionRecordError(
             "Submission claim and record identity mismatch."
         )
+
+    if claim.schema_version == 2:
+        if (
+            not isinstance(record, TokenisedSlurmSubmissionRecord)
+            or claim.submission_token != record.submission_token
+        ):
+            raise SubmissionRecordError(
+                "Submission claim and record token mismatch."
+            )
 
     try:
         actual_hash = sha256_file(input_path)
@@ -252,3 +276,25 @@ def publish_slurm_submission_record(
         ) from exc
 
     return destination
+
+
+class TokenisedSlurmSubmissionRecord(BaseModel):
+    """Version-2 record tied to a unique submission attempt."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[2] = 2
+    backend: Literal["slurm"] = "slurm"
+
+    target: str = Field(min_length=1)
+    calculation_id: str = Field(min_length=1)
+    job_id: str = Field(min_length=1)
+    submitted_at: str = Field(min_length=1)
+
+    input_file: str = Field(min_length=1)
+    input_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    submission_token: str = Field(
+        pattern=r"^[0-9a-f]{32}$"
+    )

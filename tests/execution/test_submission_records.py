@@ -287,3 +287,251 @@ def test_inspect_rejects_record_symlinks(tmp_path, dangling):
             target="archer2",
             input_file=Path("calculation.inp"),
         )
+
+
+def test_tokenised_submission_record_accepts_valid_identity():
+    from nsdw.execution.submission_records import (
+        TokenisedSlurmSubmissionRecord,
+    )
+
+    record = TokenisedSlurmSubmissionRecord(
+        target="lumi-c",
+        calculation_id="cutoff-400",
+        job_id="123456",
+        submitted_at="2026-10-12T18:00:00+00:00",
+        input_file="input.inp",
+        input_sha256="a" * 64,
+        submission_token="b" * 32,
+    )
+
+    assert record.schema_version == 2
+    assert record.submission_token == "b" * 32
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "",
+        "a" * 31,
+        "a" * 33,
+        "G" * 32,
+        "a" * 31 + "-",
+    ],
+)
+def test_tokenised_submission_record_rejects_invalid_token(token):
+    from pydantic import ValidationError
+
+    from nsdw.execution.submission_records import (
+        TokenisedSlurmSubmissionRecord,
+    )
+
+    with pytest.raises(ValidationError):
+        TokenisedSlurmSubmissionRecord(
+            target="lumi-c",
+            calculation_id="cutoff-400",
+            job_id="123456",
+            submitted_at="2026-10-12T18:00:00+00:00",
+            input_file="input.inp",
+            input_sha256="a" * 64,
+            submission_token=token,
+        )
+
+
+def test_tokenised_submission_record_rejects_extra_fields():
+    from pydantic import ValidationError
+
+    from nsdw.execution.submission_records import (
+        TokenisedSlurmSubmissionRecord,
+    )
+
+    with pytest.raises(ValidationError):
+        TokenisedSlurmSubmissionRecord(
+            target="lumi-c",
+            calculation_id="cutoff-400",
+            job_id="123456",
+            submitted_at="2026-10-12T18:00:00+00:00",
+            input_file="input.inp",
+            input_sha256="a" * 64,
+            submission_token="b" * 32,
+            unexpected="not-allowed",
+        )
+
+
+@pytest.mark.parametrize(
+    "version",
+    [1, 2],
+)
+def test_loader_accepts_supported_record_versions(tmp_path, version):
+    import json
+    from pathlib import Path
+
+    from nsdw.execution.submission_records import (
+        load_slurm_submission_record,
+        sha256_file,
+    )
+
+    input_path = tmp_path / "input.inp"
+    input_path.write_text("&GLOBAL\n&END GLOBAL\n", encoding="utf-8")
+
+    payload = {
+        "schema_version": version,
+        "backend": "slurm",
+        "target": "lumi-c",
+        "calculation_id": "cutoff-400",
+        "job_id": "123456",
+        "submitted_at": "2026-10-12T18:00:00+00:00",
+        "input_file": "input.inp",
+        "input_sha256": sha256_file(input_path),
+    }
+
+    if version == 2:
+        payload["submission_token"] = "b" * 32
+
+    (tmp_path / "submission.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    record = load_slurm_submission_record(
+        record_path=Path("submission.json"),
+        candidate_directory=tmp_path,
+        calculation_id="cutoff-400",
+        target="lumi-c",
+        input_file=Path("input.inp"),
+    )
+
+    assert record is not None
+    assert record.schema_version == version
+
+    if version == 2:
+        assert record.submission_token == "b" * 32
+
+
+@pytest.mark.parametrize(
+    "version",
+    [None, 3, True, "2"],
+)
+def test_loader_rejects_unsupported_schema_versions(tmp_path, version):
+    import json
+    from pathlib import Path
+
+    from nsdw.execution.submission_records import (
+        SubmissionRecordError,
+        load_slurm_submission_record,
+        sha256_file,
+    )
+
+    input_path = tmp_path / "input.inp"
+    input_path.write_text("CP2K input", encoding="utf-8")
+
+    payload = {
+        "backend": "slurm",
+        "target": "lumi-c",
+        "calculation_id": "cutoff-400",
+        "job_id": "123456",
+        "submitted_at": "2026-10-12T18:00:00+00:00",
+        "input_file": "input.inp",
+        "input_sha256": sha256_file(input_path),
+    }
+
+    if version is not None:
+        payload["schema_version"] = version
+
+    (tmp_path / "submission.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SubmissionRecordError):
+        load_slurm_submission_record(
+            record_path=Path("submission.json"),
+            candidate_directory=tmp_path,
+            calculation_id="cutoff-400",
+            target="lumi-c",
+            input_file=Path("input.inp"),
+        )
+
+
+@pytest.mark.parametrize(
+    "claim_version,record_version,matching_token,accepted",
+    [
+        (1, 1, True, True),
+        (1, 2, True, False),
+        (2, 1, True, False),
+        (2, 2, True, True),
+        (2, 2, False, False),
+    ],
+)
+def test_publication_requires_matching_claim_record_versions_and_tokens(
+    tmp_path,
+    claim_version,
+    record_version,
+    matching_token,
+    accepted,
+):
+    from nsdw.execution.submission_claims import (
+        SubmissionClaim,
+        TokenisedSubmissionClaim,
+        create_submission_claim,
+    )
+    from nsdw.execution.submission_records import (
+        SlurmSubmissionRecord,
+        TokenisedSlurmSubmissionRecord,
+        SubmissionRecordError,
+        publish_slurm_submission_record,
+        sha256_file,
+    )
+
+    input_path = tmp_path / "input.inp"
+    input_path.write_text("CP2K input", encoding="utf-8")
+    digest = sha256_file(input_path)
+
+    identity = {
+        "target": "lumi-c",
+        "calculation_id": "cutoff-400",
+        "input_sha256": digest,
+    }
+
+    if claim_version == 1:
+        claim = SubmissionClaim(**identity)
+    else:
+        claim = TokenisedSubmissionClaim(
+            **identity,
+            submission_token="a" * 32,
+        )
+
+    create_submission_claim(
+        candidate_directory=tmp_path,
+        claim=claim,
+    )
+
+    record_identity = {
+        **identity,
+        "job_id": "123456",
+        "submitted_at": "2026-10-12T18:00:00+00:00",
+        "input_file": "input.inp",
+    }
+
+    if record_version == 1:
+        record = SlurmSubmissionRecord(**record_identity)
+    else:
+        record = TokenisedSlurmSubmissionRecord(
+            **record_identity,
+            submission_token=(
+                "a" * 32 if matching_token else "b" * 32
+            ),
+        )
+
+    if accepted:
+        published = publish_slurm_submission_record(
+            candidate_directory=tmp_path,
+            record=record,
+        )
+        assert published.is_file()
+    else:
+        with pytest.raises(SubmissionRecordError):
+            publish_slurm_submission_record(
+                candidate_directory=tmp_path,
+                record=record,
+            )
+        assert not (tmp_path / "submission.json").exists()

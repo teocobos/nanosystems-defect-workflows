@@ -526,3 +526,148 @@ def test_slurm_resume_blocks_unreconciled_claim(
     )
 
     assert plan.candidates[0].action == CP2KResumeAction.BLOCK
+
+
+@pytest.mark.parametrize(
+    "claim_version,record_version,matching_token,expected_action",
+    [
+        (1, 1, True, CP2KResumeAction.MONITOR),
+        (2, 2, True, CP2KResumeAction.MONITOR),
+        (2, 2, False, CP2KResumeAction.BLOCK),
+        (2, 1, True, CP2KResumeAction.BLOCK),
+        (1, 2, True, CP2KResumeAction.BLOCK),
+    ],
+)
+def test_slurm_resume_requires_matching_claim_record_identity(
+    monkeypatch,
+    tmp_path,
+    claim_version,
+    record_version,
+    matching_token,
+    expected_action,
+):
+    from types import SimpleNamespace
+
+    from nsdw.execution.slurm import SlurmJobState, SlurmStatusResult
+    from nsdw.execution.submission_claims import (
+        SubmissionClaim,
+        TokenisedSubmissionClaim,
+        create_submission_claim,
+    )
+    from nsdw.execution.submission_records import (
+        SlurmSubmissionRecord,
+        TokenisedSlurmSubmissionRecord,
+        sha256_file,
+    )
+    from nsdw.workflows.convergence.cp2k_resume import (
+        plan_cp2k_convergence_slurm_resume,
+    )
+
+    candidate_dir = tmp_path / "10-Ry"
+    candidate_dir.mkdir()
+
+    input_path = candidate_dir / "calculation.inp"
+    input_path.write_text("test input", encoding="utf-8")
+
+    identity = {
+        "target": "archer2",
+        "calculation_id": "10-Ry",
+        "input_sha256": sha256_file(input_path),
+    }
+
+    if claim_version == 1:
+        claim = SubmissionClaim(**identity)
+    else:
+        claim = TokenisedSubmissionClaim(
+            **identity,
+            submission_token="a" * 32,
+        )
+
+    create_submission_claim(
+        candidate_directory=candidate_dir,
+        claim=claim,
+    )
+
+    record_identity = {
+        **identity,
+        "job_id": "12345",
+        "submitted_at": "2026-10-12T18:00:00+01:00",
+        "input_file": "calculation.inp",
+    }
+
+    if record_version == 1:
+        record = SlurmSubmissionRecord(**record_identity)
+    else:
+        record = TokenisedSlurmSubmissionRecord(
+            **record_identity,
+            submission_token=(
+                "a" * 32 if matching_token else "b" * 32
+            ),
+        )
+
+    # Deliberately write the record directly to test untrusted
+    # on-disk evidence, bypassing the protected publisher.
+    (candidate_dir / "submission.json").write_text(
+        record.model_dump_json(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "nsdw.workflows.convergence.cp2k_resume."
+        "inspect_cp2k_convergence_campaign",
+        lambda _: CP2KCampaignStatus(
+            campaign_directory=tmp_path,
+            candidates=(
+                CP2KCandidateStatus(
+                    label="10-Ry",
+                    state=CP2KCandidateState.PENDING,
+                    reason="No output",
+                    input_path=input_path,
+                    output_path=None,
+                ),
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        "nsdw.workflows.convergence.manifest."
+        "load_convergence_manifest",
+        lambda _: SimpleNamespace(
+            candidates=(
+                SimpleNamespace(
+                    label="10-Ry",
+                    directory="10-Ry",
+                    input_file="calculation.inp",
+                ),
+            ),
+        ),
+    )
+
+    class FakeExecutor:
+        def query_status(self, job_id):
+            if expected_action == CP2KResumeAction.BLOCK:
+                pytest.fail(
+                    "Untrusted claim-record evidence must not "
+                    "reach the scheduler."
+                )
+
+            assert job_id == "12345"
+
+            return SlurmStatusResult(
+                job_id=job_id,
+                state=SlurmJobState.RUNNING,
+                raw_state="RUNNING",
+            )
+
+    plan = plan_cp2k_convergence_slurm_resume(
+        tmp_path,
+        target="archer2",
+        executor=FakeExecutor(),
+    )
+
+    assert plan.candidates[0].action == expected_action
+
+    if expected_action == CP2KResumeAction.BLOCK:
+        assert "Untrusted submission evidence" in (
+            plan.candidates[0].reason
+        )

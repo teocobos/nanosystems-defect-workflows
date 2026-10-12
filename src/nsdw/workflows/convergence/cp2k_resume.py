@@ -196,10 +196,22 @@ def plan_cp2k_convergence_slurm_resume(
                 )
 
                 if claim is not None and record is not None:
-                    if claim.input_sha256 != record.input_sha256:
+                    if (
+                        claim.input_sha256 != record.input_sha256
+                        or claim.schema_version != record.schema_version
+                    ):
                         raise SubmissionClaimError(
                             "Claim and submission record disagree."
                         )
+
+                    if claim.schema_version == 2:
+                        if (
+                            claim.submission_token
+                            != record.submission_token
+                        ):
+                            raise SubmissionClaimError(
+                                "Claim and submission record token mismatch."
+                            )
 
             except (SubmissionClaimError, SubmissionRecordError, OSError) as exc:
                 record = None
