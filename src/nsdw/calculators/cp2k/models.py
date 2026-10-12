@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from nsdw.calculators.cp2k.generation_models import CP2KKPointConfig
+
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -160,6 +162,7 @@ class ParsedCP2KInput(BaseModel):
     )
 
     k_points: tuple[int, int, int] | None = None
+    kpoint_sampling: CP2KKPointConfig | None = None
     scf_solver: Literal["OT", "DIAGONALIZATION"] | None = None
 
     scf_guess: str | None = None

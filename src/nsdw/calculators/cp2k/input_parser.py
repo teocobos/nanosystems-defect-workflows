@@ -5,6 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from nsdw.calculators.cp2k.generation_models import (
+    CP2KKPointConfig,
+    CP2KWeightedKPoint,
+)
+
 from nsdw.calculators.cp2k.models import (
     CP2KRunType,
     ParsedCP2KInput,
@@ -97,40 +104,152 @@ def _parse_int(
     )
 
 
+def _parse_kpoint_sampling(
+    text: str,
+) -> CP2KKPointConfig | None:
+    """Parse a KPOINTS section without silently losing sampling settings."""
+
+    sections: list[list[str]] = []
+    current: list[str] | None = None
+
+    for original_line in text.splitlines():
+        line = (
+            original_line.split("!", 1)[0]
+            .split("#", 1)[0]
+            .strip()
+        )
+
+        if not line:
+            continue
+
+        parts = line.split()
+        marker = parts[0].upper()
+
+        if marker == "&KPOINTS":
+            if current is not None:
+                raise CP2KInputParseError(
+                    "Nested KPOINTS sections are unsupported."
+                )
+            current = []
+            continue
+
+        if marker in {"&END", "&END_KPOINTS"} and current is not None:
+            if marker == "&END" and (
+                len(parts) != 2 or parts[1].upper() != "KPOINTS"
+            ):
+                raise CP2KInputParseError(
+                    "Unexpected section ending inside KPOINTS."
+                )
+            sections.append(current)
+            current = None
+            continue
+
+        if current is not None:
+            if marker.startswith("&"):
+                raise CP2KInputParseError(
+                    "Nested sections inside KPOINTS are unsupported."
+                )
+            current.append(line)
+
+    if current is not None:
+        raise CP2KInputParseError(
+            "Unterminated KPOINTS section."
+        )
+
+    if not sections:
+        return None
+
+    if len(sections) != 1:
+        raise CP2KInputParseError(
+            "Repeated KPOINTS sections are unsupported."
+        )
+
+    scheme_lines = []
+    point_lines = []
+
+    for line in sections[0]:
+        parts = line.split()
+        keyword = parts[0].upper()
+
+        if keyword == "SCHEME":
+            scheme_lines.append(parts[1:])
+        elif keyword == "KPOINT":
+            point_lines.append(parts[1:])
+        else:
+            raise CP2KInputParseError(
+                f"Unsupported KPOINTS keyword: {keyword}"
+            )
+
+    if len(scheme_lines) != 1 or not scheme_lines[0]:
+        raise CP2KInputParseError(
+            "KPOINTS requires exactly one SCHEME keyword."
+        )
+
+    args = scheme_lines[0]
+    scheme = args[0].upper().replace("_", "-")
+
+    try:
+        if scheme in {"NONE", "GAMMA"}:
+            if len(args) != 1 or point_lines:
+                raise ValueError("Unexpected arguments for gamma sampling.")
+            return CP2KKPointConfig(scheme=scheme)
+
+        if scheme == "MONKHORST-PACK":
+            if len(args) != 4 or point_lines:
+                raise ValueError("Invalid MONKHORST-PACK arguments.")
+            return CP2KKPointConfig(
+                scheme=scheme,
+                mesh=tuple(int(value) for value in args[1:]),
+            )
+
+        if scheme == "MACDONALD":
+            if len(args) != 7 or point_lines:
+                raise ValueError("Invalid MACDONALD arguments.")
+            return CP2KKPointConfig(
+                scheme=scheme,
+                mesh=tuple(int(value) for value in args[1:4]),
+                shift=tuple(float(value) for value in args[4:7]),
+            )
+
+        if scheme == "GENERAL":
+            if len(args) != 1 or not point_lines:
+                raise ValueError("Invalid GENERAL k-point specification.")
+
+            points = []
+            for values in point_lines:
+                if len(values) != 4:
+                    raise ValueError(
+                        "Each KPOINT requires three coordinates and weight."
+                    )
+                points.append(
+                    CP2KWeightedKPoint(
+                        coordinates=tuple(float(v) for v in values[:3]),
+                        weight=float(values[3]),
+                    )
+                )
+
+            return CP2KKPointConfig(
+                scheme=scheme,
+                points=tuple(points),
+            )
+
+        raise ValueError(f"Unsupported k-point scheme: {scheme}")
+
+    except (ValueError, TypeError, ValidationError) as exc:
+        raise CP2KInputParseError(
+            f"Invalid KPOINTS configuration: {exc}"
+        ) from exc
+
+
 def _parse_k_points(
     text: str,
 ) -> tuple[int, int, int] | None:
-    section = _section(
-        text,
-        "KPOINTS",
-    )
+    """Legacy Monkhorst-Pack mesh extracted from structured sampling."""
 
-    if section is None:
-        return None
+    sampling = _parse_kpoint_sampling(text)
 
-    scheme = _keyword(
-        section,
-        "SCHEME",
-    )
-
-    if scheme is None:
-        return None
-
-    parts = scheme.split()
-
-    if (
-        len(parts) >= 4
-        and parts[0].upper()
-        in {
-            "MONKHORST-PACK",
-            "MONKHORST_PACK",
-        }
-    ):
-        return (
-            int(parts[1]),
-            int(parts[2]),
-            int(parts[3]),
-        )
+    if sampling is not None and sampling.scheme == "MONKHORST-PACK":
+        return sampling.mesh
 
     return None
 
@@ -450,6 +569,7 @@ def parse_cp2k_input_text(
         k_points=_parse_k_points(
             text
         ),
+        kpoint_sampling=_parse_kpoint_sampling(text),
         scf_solver=_parse_scf_solver(text),
         kinds=_parse_kinds(
             text

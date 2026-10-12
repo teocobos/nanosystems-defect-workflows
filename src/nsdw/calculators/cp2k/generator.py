@@ -7,6 +7,7 @@ from pymatgen.core import Structure
 from nsdw.calculators.cp2k.generation_models import (
     CP2KCoordinateMode,
     CP2KInputConfig,
+    CP2KKPointScheme,
     CP2KXCFunctional,
 )
 
@@ -52,10 +53,26 @@ def _render_scf(
 
     scf = config.scf
 
-    if config.k_points is not None and scf.solver == "OT":
+    structured = config.kpoint_sampling
+
+    if config.k_points is not None and structured is not None:
+        raise CP2KGenerationError(
+            "Legacy and structured k-point configurations conflict."
+        )
+
+    explicit_sampling = (
+        config.k_points is not None
+        or (
+            structured is not None
+            and structured.scheme != CP2KKPointScheme.NONE
+        )
+    )
+
+    if explicit_sampling and scf.solver == "OT":
         raise CP2KGenerationError(
             "Explicit k-point sampling requires "
-            "SCF solver DIAGONALIZATION; OT is unsupported."
+            "SCF solver DIAGONALIZATION; OT is unsupported "
+            "by the current NSDW compatibility policy."
         )
 
     lines = [
@@ -94,26 +111,73 @@ def _render_scf(
 def _render_kpoints(
     config: CP2KInputConfig,
 ) -> list[str]:
-    """Render k-points when explicitly configured."""
+    """Render legacy or structured CP2K k-point sampling."""
 
-    if config.k_points is None:
-        return []
+    structured = config.kpoint_sampling
 
-    kx, ky, kz = config.k_points
-
-    if min(kx, ky, kz) <= 0:
+    if config.k_points is not None and structured is not None:
         raise CP2KGenerationError(
-            "CP2K k-point values must all be positive."
+            "Legacy and structured k-point configurations conflict."
         )
 
-    return [
-        "    &KPOINTS",
-        (
-            "      SCHEME MONKHORST-PACK "
-            f"{kx} {ky} {kz}"
-        ),
-        "    &END KPOINTS",
-    ]
+    if structured is None:
+        if config.k_points is None:
+            return []
+
+        kx, ky, kz = config.k_points
+
+        if min(kx, ky, kz) <= 0:
+            raise CP2KGenerationError(
+                "CP2K k-point values must all be positive."
+            )
+
+        return [
+            "    &KPOINTS",
+            f"      SCHEME MONKHORST-PACK {kx} {ky} {kz}",
+            "    &END KPOINTS",
+        ]
+
+    if structured.scheme == CP2KKPointScheme.NONE:
+        return []
+
+    lines = ["    &KPOINTS"]
+
+    if structured.scheme == CP2KKPointScheme.GAMMA:
+        lines.append("      SCHEME GAMMA")
+
+    elif structured.scheme == CP2KKPointScheme.MONKHORST_PACK:
+        kx, ky, kz = structured.mesh
+        lines.append(
+            f"      SCHEME MONKHORST-PACK {kx} {ky} {kz}"
+        )
+
+    elif structured.scheme == CP2KKPointScheme.MACDONALD:
+        kx, ky, kz = structured.mesh
+        sx, sy, sz = structured.shift
+        lines.append(
+            "      SCHEME MACDONALD "
+            f"{kx} {ky} {kz} "
+            f"{sx:.12g} {sy:.12g} {sz:.12g}"
+        )
+
+    elif structured.scheme == CP2KKPointScheme.GENERAL:
+        lines.append("      SCHEME GENERAL")
+        for point in structured.points:
+            x, y, z = point.coordinates
+            lines.append(
+                "      KPOINT "
+                f"{x:.12g} {y:.12g} {z:.12g} "
+                f"{point.weight:.12g}"
+            )
+
+    else:
+        raise CP2KGenerationError(
+            f"Unsupported k-point scheme: {structured.scheme}"
+        )
+
+    lines.append("    &END KPOINTS")
+    return lines
+
 
 
 def _render_cell(

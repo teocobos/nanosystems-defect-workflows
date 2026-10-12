@@ -9,6 +9,7 @@ from typing import Any
 from pymatgen.core import Structure
 
 from nsdw.calculators.cp2k.adapter import HARTREE_TO_EV
+from nsdw.calculators.cp2k.generation_models import CP2KKPointScheme
 from nsdw.calculators.cp2k.input_parser import parse_cp2k_input
 from nsdw.calculators.cp2k.models import CP2KSCFStatus
 from nsdw.calculators.cp2k.parser import parse_cp2k_output
@@ -94,6 +95,7 @@ def _input_signature(parsed: Any, parameter: str) -> tuple:
         "eps_scf",
         "scf_solver",
         "k_points",
+        "kpoint_sampling",
         "kinds",
         "basis_set_file",
         "potential_file",
@@ -108,7 +110,8 @@ def _input_signature(parsed: Any, parameter: str) -> tuple:
 
     if parameter == "kpoints":
         fields = tuple(
-            field for field in fields if field != "k_points"
+            field for field in fields
+            if field not in ("k_points", "kpoint_sampling")
         )
 
     if parameter == "basis":
@@ -121,6 +124,35 @@ def _input_signature(parsed: Any, parameter: str) -> tuple:
         (field, getattr(parsed, field))
         for field in fields
     )
+
+
+def _resolve_kpoint_evidence_mesh(
+    parsed: Any,
+    label: str,
+) -> tuple[int, int, int] | None:
+    """Resolve a supported mesh without hiding conflicting evidence."""
+    sampling = parsed.kpoint_sampling
+    legacy_mesh = parsed.k_points
+
+    if sampling is None:
+        return legacy_mesh
+
+    if (
+        sampling.scheme != CP2KKPointScheme.MONKHORST_PACK
+        or sampling.mesh is None
+        or sampling.shift is not None
+        or sampling.points
+    ):
+        raise ConvergenceEvidenceValidationError(
+            f"Unsupported k-point sampling for mesh convergence: {label}."
+        )
+
+    if legacy_mesh is not None and legacy_mesh != sampling.mesh:
+        raise ConvergenceEvidenceValidationError(
+            f"Conflicting k-point mesh evidence: {label}."
+        )
+
+    return sampling.mesh
 
 
 def validate_cp2k_calculation_evidence(
@@ -282,8 +314,10 @@ def validate_cp2k_calculation_evidence(
             actual = parsed_input.relative_cutoff_ry
             expected = candidate.value.value
         elif parameter == "kpoints":
-            actual = parsed_input.k_points
             expected = tuple(candidate.value)
+            actual = _resolve_kpoint_evidence_mesh(
+                parsed_input, candidate.label
+            )
         elif parameter == "basis":
             if not isinstance(candidate.value, str):
                 raise ConvergenceEvidenceValidationError(

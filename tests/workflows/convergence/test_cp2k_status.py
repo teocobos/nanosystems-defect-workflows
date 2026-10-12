@@ -10,21 +10,25 @@ from nsdw.workflows.convergence.cp2k_status import (
 )
 
 
-def test_generated_relative_cutoff_campaign_is_pending():
-    campaign = Path(
-        "outputs/archer2-validation/sio2-pbe-relative-cutoff"
-    )
+def test_generated_relative_cutoff_campaign_is_pending(tmp_path):
+    """A generated candidate without CP2K output must be pending."""
+    campaign, candidate = _copy_relative_cutoff_candidate(tmp_path)
 
-    if not campaign.is_dir():
-        pytest.skip("Local ARCHER2 campaign not available.")
+    candidate_directory = campaign / candidate["directory"]
+    input_path = candidate_directory / candidate["input_file"]
+
+    # Remove output evidence from the isolated test copy only.
+    for output_path in (
+        input_path.with_suffix(".out"),
+        candidate_directory / "calculation.out",
+    ):
+        if output_path.exists() or output_path.is_symlink():
+            output_path.unlink()
 
     result = inspect_cp2k_convergence_campaign(campaign)
 
-    assert len(result.candidates) == 10
-    assert all(
-        candidate.state == CP2KCandidateState.PENDING
-        for candidate in result.candidates
-    )
+    assert len(result.candidates) == 1
+    assert result.candidates[0].state == CP2KCandidateState.PENDING
     assert not result.all_completed
 
 

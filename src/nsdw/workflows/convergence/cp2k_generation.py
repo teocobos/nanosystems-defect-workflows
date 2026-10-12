@@ -10,6 +10,8 @@ from pymatgen.core import Structure
 from nsdw.calculators.cp2k.generation_models import (
     CP2KBasisPotentialConfig,
     CP2KInputConfig,
+    CP2KKPointConfig,
+    CP2KKPointScheme,
 )
 from nsdw.calculators.cp2k.package import (
     write_cp2k_package,
@@ -88,6 +90,17 @@ def _candidate_config(
             "CP2K convergence candidates must define a value."
         )
 
+    # Validate the original configuration before candidate updates.
+    # Otherwise, updates could erase an invalid or conflicting setting.
+    try:
+        base_config = CP2KInputConfig.model_validate(
+            base_config.model_dump(mode="python")
+        )
+    except Exception as exc:
+        raise CP2KConvergenceGenerationError(
+            f"Invalid CP2K convergence candidate configuration: {exc}"
+        ) from exc
+
     updates: dict[str, object] = {
         "project_name": project_name,
     }
@@ -110,12 +123,39 @@ def _candidate_config(
         updates["relative_cutoff_ry"] = value.value
 
     elif parameter == ConvergenceParameter.KPOINTS:
-        if not isinstance(value, tuple):
+        if not (
+            isinstance(value, tuple)
+            and len(value) == 3
+            and all(type(component) is int and component > 0 for component in value)
+        ):
             raise CP2KConvergenceGenerationError(
-                "CP2K k-point convergence requires tuple values."
+                "CP2K k-point convergence requires positive three-integer meshes."
             )
 
-        updates["k_points"] = value
+        sampling = base_config.kpoint_sampling
+
+        if sampling is not None and sampling.scheme not in {
+            CP2KKPointScheme.NONE,
+            CP2KKPointScheme.MONKHORST_PACK,
+        }:
+            raise CP2KConvergenceGenerationError(
+                "Mesh convergence supports only implicit Gamma "
+                "or Monkhorst-Pack base sampling."
+            )
+
+        if base_config.scf.solver != "DIAGONALIZATION":
+            raise CP2KConvergenceGenerationError(
+                "K-point convergence requires SCF solver DIAGONALIZATION."
+            )
+
+        if sampling is None:
+            updates["k_points"] = value
+        else:
+            updates["k_points"] = None
+            updates["kpoint_sampling"] = CP2KKPointConfig(
+                scheme=CP2KKPointScheme.MONKHORST_PACK,
+                mesh=value,
+            )
 
     elif parameter == ConvergenceParameter.BASIS:
         if basis_candidates is None:
@@ -143,9 +183,16 @@ def _candidate_config(
             f"Unsupported CP2K convergence parameter: {parameter}"
         )
 
-    return base_config.model_copy(
-        update=updates,
-    )
+    candidate_config = base_config.model_copy(update=updates)
+
+    try:
+        return CP2KInputConfig.model_validate(
+            candidate_config.model_dump(mode="python")
+        )
+    except Exception as exc:
+        raise CP2KConvergenceGenerationError(
+            f"Invalid CP2K convergence candidate configuration: {exc}"
+        ) from exc
 
 
 def generate_cp2k_convergence_study(
