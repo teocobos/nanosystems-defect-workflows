@@ -204,6 +204,7 @@ def generate_cp2k_convergence_study(
     output_directory: str | Path,
     basis_candidates: dict[str, CP2KBasisPotentialConfig] | None = None,
     kpoint_planner_provenance: dict | None = None,
+    basis_selection_provenance: dict | None = None,
 ) -> tuple[Path, ...]:
     """Generate one portable CP2K package per convergence candidate."""
 
@@ -243,6 +244,83 @@ def generate_cp2k_convergence_study(
         except (TypeError, ValueError) as exc:
             raise CP2KConvergenceGenerationError(
                 "K-point planner provenance is not valid finite JSON."
+            ) from exc
+
+    if basis_selection_provenance is not None:
+        if study.parameter != ConvergenceParameter.BASIS:
+            raise CP2KConvergenceGenerationError(
+                "Basis selection provenance requires a basis study."
+            )
+
+        if not isinstance(basis_selection_provenance, dict):
+            raise CP2KConvergenceGenerationError(
+                "Basis selection provenance must be a dictionary."
+            )
+
+        if basis_selection_provenance.get("schema_version") != 1:
+            raise CP2KConvergenceGenerationError(
+                "Unsupported basis selection provenance schema."
+            )
+
+        if basis_selection_provenance.get("strategy") not in {
+            "standard", "custom"
+        }:
+            raise CP2KConvergenceGenerationError(
+                "Invalid basis selection strategy."
+            )
+
+        entries = basis_selection_provenance.get("candidates")
+
+        if not isinstance(entries, list) or len(entries) != len(
+            study.candidates
+        ):
+            raise CP2KConvergenceGenerationError(
+                "Basis provenance candidate count differs from study."
+            )
+
+        for entry, candidate in zip(
+            entries, study.candidates, strict=True
+        ):
+            if (
+                not isinstance(entry, dict)
+                or entry.get("label") != candidate.label
+                or not isinstance(entry.get("preset"), str)
+                or not entry["preset"]
+            ):
+                raise CP2KConvergenceGenerationError(
+                    "Basis provenance does not match study candidates."
+                )
+
+        from nsdw.calculators.cp2k.presets import (
+            get_basis_potential_preset,
+        )
+
+        if basis_candidates is None:
+            raise CP2KConvergenceGenerationError(
+                "Basis selection provenance requires basis candidates."
+            )
+
+        for entry in entries:
+            label = entry["label"]
+            try:
+                resolved = get_basis_potential_preset(entry["preset"])
+            except (KeyError, ValueError) as exc:
+                raise CP2KConvergenceGenerationError(
+                    f"Unknown basis provenance preset for {label}."
+                ) from exc
+
+            actual = basis_candidates.get(label)
+            if actual is None or resolved != actual:
+                raise CP2KConvergenceGenerationError(
+                    f"Basis provenance preset does not match "
+                    f"candidate {label}."
+                )
+
+        try:
+            json.dumps(basis_selection_provenance, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise CP2KConvergenceGenerationError(
+                "Basis provenance is not valid finite JSON."
             ) from exc
 
     output_existed_before = output_directory.exists()
@@ -389,6 +467,17 @@ def generate_cp2k_convergence_study(
             with provenance_path.open("x", encoding="utf-8") as handle:
                 json.dump(
                     kpoint_planner_provenance,
+                    handle,
+                    indent=2,
+                    allow_nan=False,
+                )
+                handle.write("\n")
+
+        if basis_selection_provenance is not None:
+            provenance_path = output_directory / "basis-selection.json"
+            with provenance_path.open("x", encoding="utf-8") as handle:
+                json.dump(
+                    basis_selection_provenance,
                     handle,
                     indent=2,
                     allow_nan=False,

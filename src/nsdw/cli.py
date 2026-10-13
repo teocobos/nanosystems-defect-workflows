@@ -1510,7 +1510,7 @@ def workflow_convergence_generate(
         ...,
         help="Input structure file.",
     ),
-    parameter: Literal["cutoff", "relative_cutoff", "kpoints"] = typer.Option(
+    parameter: Literal["cutoff", "relative_cutoff", "kpoints", "basis"] = typer.Option(
         "cutoff",
         "--parameter",
         "-p",
@@ -1530,6 +1530,21 @@ def workflow_convergence_generate(
         False,
         "--auto",
         help="Automatically generate reciprocal-lattice-based k-point meshes.",
+    ),
+    basis_strategy: Literal["standard", "custom"] = typer.Option(
+        "standard",
+        "--basis-strategy",
+        help="Basis candidate selection: standard or custom.",
+    ),
+    basis_candidates_raw: list[str] = typer.Option(
+        [],
+        "--basis-candidate",
+        help="Custom basis candidate LABEL=PRESET; repeat as needed.",
+    ),
+    kpoint_mesh: str | None = typer.Option(
+        None,
+        "--kpoint-mesh",
+        help="Fixed Monkhorst-Pack mesh, e.g. 2x2x2.",
     ),
     cutoff: float = typer.Option(
         600.0,
@@ -1593,7 +1608,111 @@ def workflow_convergence_generate(
             preset,
         )
 
-        if parameter == "kpoints":
+        if parameter != "basis" and (
+            basis_strategy != "standard" or basis_candidates_raw
+        ):
+            raise ValueError(
+                "Basis strategy and candidates require --parameter basis."
+            )
+
+        if kpoint_mesh is not None:
+            if parameter == "kpoints":
+                raise ValueError(
+                    "--kpoint-mesh is a fixed mesh and cannot be used "
+                    "during k-point convergence."
+                )
+            parts = kpoint_mesh.lower().split("x")
+            if len(parts) != 3 or not all(
+                part.isdecimal() and int(part) > 0 for part in parts
+            ):
+                raise ValueError(
+                    f"Invalid fixed k-point mesh {kpoint_mesh!r}; "
+                    "expected NxNxN."
+                )
+            fixed_mesh = tuple(map(int, parts))
+        else:
+            fixed_mesh = None
+
+        basis_selection_provenance = None
+        basis_candidate_configs = None
+
+        if parameter == "basis":
+            if auto or meshes or values:
+                raise ValueError(
+                    "Basis convergence does not accept --auto, "
+                    "--mesh or --values."
+                )
+
+            if basis_strategy == "standard":
+                if basis_candidates_raw:
+                    raise ValueError(
+                        "Use --basis-strategy custom for explicit "
+                        "--basis-candidate values."
+                    )
+                if preset not in {
+                    "sio2-pbe-dzvp",
+                    "sio2-pbe-tzvp",
+                    "sio2-pbe-tzv2p",
+                }:
+                    raise ValueError(
+                        "No verified standard basis sequence exists "
+                        f"for preset {preset!r}."
+                    )
+                basis_names = (
+                    ("DZVP", "sio2-pbe-dzvp"),
+                    ("TZVP", "sio2-pbe-tzvp"),
+                    ("TZV2P", "sio2-pbe-tzv2p"),
+                )
+            else:
+                if len(basis_candidates_raw) < 2:
+                    raise ValueError(
+                        "Custom basis convergence requires at least "
+                        "two --basis-candidate values."
+                    )
+                basis_names = []
+                for item in basis_candidates_raw:
+                    if item.count("=") != 1:
+                        raise ValueError(
+                            "Expected --basis-candidate LABEL=PRESET."
+                        )
+                    label, candidate_preset = item.split("=", 1)
+                    if not label or not candidate_preset:
+                        raise ValueError(
+                            "Basis candidate label and preset cannot be empty."
+                        )
+                    if not label.isidentifier():
+                        raise ValueError(
+                            "Basis candidate labels must be identifiers."
+                        )
+                    basis_names.append((label, candidate_preset))
+
+            if len({label for label, _ in basis_names}) != len(basis_names):
+                raise ValueError("Duplicate basis candidate labels.")
+
+            basis_candidate_configs = {
+                label: get_basis_potential_preset(candidate_preset)
+                for label, candidate_preset in basis_names
+            }
+
+            basis_selection_provenance = {
+                "schema_version": 1,
+                "strategy": basis_strategy,
+                "candidates": [
+                    {"label": label, "preset": candidate_preset}
+                    for label, candidate_preset in basis_names
+                ],
+            }
+
+            candidates = [
+                ConvergenceCandidate(
+                    label=label,
+                    order=order,
+                    value=label,
+                )
+                for order, (label, _) in enumerate(basis_names)
+            ]
+
+        elif parameter == "kpoints":
             if values:
                 raise ValueError(
                     "Use --mesh rather than --values for k-point convergence."
@@ -1669,10 +1788,11 @@ def workflow_convergence_generate(
             cutoff_ry=cutoff,
             relative_cutoff_ry=relative_cutoff,
             basis_potential=basis_potential,
+            k_points=fixed_mesh,
             scf={
                 "solver": (
                     "DIAGONALIZATION"
-                    if parameter == "kpoints"
+                    if parameter == "kpoints" or fixed_mesh is not None
                     else "OT"
                 ),
             },
@@ -1708,6 +1828,8 @@ def workflow_convergence_generate(
             base_config=base_config,
             study=study,
             output_directory=output_directory,
+            basis_candidates=basis_candidate_configs,
+            basis_selection_provenance=basis_selection_provenance,
             kpoint_planner_provenance=planner_provenance,
         )
 
