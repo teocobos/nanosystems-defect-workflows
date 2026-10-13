@@ -91,6 +91,24 @@ SIO2_PBE_TZV2P = CP2KBasisPotentialConfig(
 )
 
 
+SIO2_PBE_TZV2PX = CP2KBasisPotentialConfig(
+    basis_set_file="BASIS_MOLOPT",
+    potential_file="GTH_POTENTIALS",
+    kinds=(
+        CP2KKindConfig(
+            element="Si",
+            basis_set="TZV2PX-MOLOPT-GTH-q4",
+            potential="GTH-PBE-q4",
+        ),
+        CP2KKindConfig(
+            element="O",
+            basis_set="TZV2PX-MOLOPT-GTH-q6",
+            potential="GTH-PBE-q6",
+        ),
+    ),
+)
+
+
 BASIS_POTENTIAL_PRESETS: dict[
     str,
     CP2KBasisPotentialConfig,
@@ -99,6 +117,7 @@ BASIS_POTENTIAL_PRESETS: dict[
     "sio2-pbe-dzvp": SIO2_PBE_DZVP,
     "sio2-pbe-tzvp": SIO2_PBE_TZVP,
     "sio2-pbe-tzv2p": SIO2_PBE_TZV2P,
+    "sio2-pbe-tzv2px": SIO2_PBE_TZV2PX,
 }
 
 
