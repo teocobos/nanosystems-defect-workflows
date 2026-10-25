@@ -221,7 +221,12 @@ class ConvergenceReport:
                     }
                 )
 
-    def write_plot(self, path: str | Path) -> None:
+    def write_plot(
+        self,
+        path: str | Path,
+        *,
+        dpi: int = 600,
+    ) -> None:
         """
         Write a scientific convergence plot as PNG or SVG.
     
@@ -237,11 +242,14 @@ class ConvergenceReport:
         output_path = Path(path)
         suffix = output_path.suffix.lower()
     
-        if suffix not in {".png", ".svg"}:
+        if suffix not in {".png", ".svg", ".pdf"}:
             raise ValueError(
                 "Unsupported convergence plot format "
-                f"{suffix!r}; expected '.png' or '.svg'."
+                f"{suffix!r}; expected '.png', '.svg' or '.pdf'."
             )
+
+        if isinstance(dpi, bool) or not isinstance(dpi, int) or dpi < 72:
+            raise ValueError("Plot DPI must be an integer >= 72.")
     
         import matplotlib.pyplot as plt
     
@@ -306,18 +314,26 @@ class ConvergenceReport:
                 self.parameter.value.replace("_", " ").title()
             )
     
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=(7.2, 4.6))
+        fig.patch.set_facecolor("white")
+        ax.set_facecolor("white")
     
         ax.plot(
             x_values,
             reference_differences_mev,
             marker="o",
+            color="#0B2545",
+            linewidth=2.0,
+            markersize=6,
             label="Difference from highest-cost reference",
         )
         ax.plot(
             x_values,
             tail_differences_mev,
             marker="s",
+            color="#008E99",
+            linewidth=1.8,
+            markersize=5,
             label="Maximum difference vs higher-cost candidates",
         )
     
@@ -376,7 +392,9 @@ class ConvergenceReport:
         try:
             fig.savefig(
                 output_path,
-                dpi=300 if suffix == ".png" else None,
+                dpi=dpi if suffix == ".png" else None,
+                facecolor="white",
+                bbox_inches="tight",
             )
         finally:
             plt.close(fig)

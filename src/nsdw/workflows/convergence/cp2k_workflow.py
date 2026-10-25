@@ -97,13 +97,25 @@ def _run_cp2k_convergence_pipeline(
     return study, observations
 
 
+
+import warnings
+
+from nsdw.workflows.convergence.multigrid_extraction import (
+    extract_multigrid_dataset,
+)
+from nsdw.workflows.convergence.multigrid_plotting import (
+    render_multigrid_figures,
+)
+
 def _build_and_write_convergence_report(
     *,
     campaign_directory: Path,
     study,
     observations,
+    generate_figures: bool = True,
+    overwrite_figures: bool = False,
 ) -> ConvergenceReport:
-    """Analyse observations and write convergence reports."""
+    """Analyse observations and write reports and optional figures."""
 
     observation_list = list(observations)
 
@@ -138,12 +150,77 @@ def _build_and_write_convergence_report(
         campaign_directory / "convergence-report.csv"
     )
 
+    figure_directory = campaign_directory / "figures"
+
+    # Scientific data extraction is independent of figure rendering.
+    multigrid_dataset = None
+
+    try:
+        multigrid_dataset = extract_multigrid_dataset(
+            campaign_directory,
+            overwrite=overwrite_figures,
+        )
+    except FileNotFoundError as exc:
+        warnings.warn(
+            "Multigrid extraction skipped because a required "
+            f"CP2K file is unavailable: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
+    except FileExistsError:
+        raise
+
+    if generate_figures:
+        figure_directory.mkdir(parents=True, exist_ok=True)
+
+        for extension in ("png", "pdf", "svg"):
+            figure = (
+                figure_directory
+                / f"convergence-energy.{extension}"
+            )
+            if overwrite_figures or not figure.exists():
+                report.write_plot(figure)
+
+        if multigrid_dataset is not None:
+            figure_names = (
+                "gaussian_grid_counts",
+                "gaussian_grid_distribution",
+                "multigrid_cutoff_levels",
+            )
+
+            expected = [
+                figure_directory / f"{name}.{extension}"
+                for name in figure_names
+                for extension in ("png", "pdf", "svg")
+            ]
+
+            existing = [
+                path for path in expected if path.exists()
+            ]
+
+            if overwrite_figures or not existing:
+                render_multigrid_figures(
+                    multigrid_dataset,
+                    figure_directory,
+                )
+            elif len(existing) != len(expected):
+                warnings.warn(
+                    "Some multigrid figures already exist, but "
+                    "the figure set is incomplete. No figures "
+                    "were overwritten. Use explicit overwrite "
+                    "to regenerate the complete set.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
     return report
 
 
 def analyse_and_report_existing_cp2k_convergence_campaign(
     *,
     campaign_directory: str | Path,
+    generate_figures: bool = True,
+    overwrite_figures: bool = False,
 ) -> ConvergenceReport:
     """Analyse and report an already completed CP2K campaign."""
 
@@ -174,6 +251,8 @@ def analyse_and_report_existing_cp2k_convergence_campaign(
         campaign_directory=campaign_directory,
         study=study,
         observations=observations,
+        generate_figures=generate_figures,
+        overwrite_figures=overwrite_figures,
     )
 
 
@@ -208,6 +287,8 @@ def run_and_report_cp2k_convergence_campaign(
     campaign_directory: str | Path,
     executable: str = "cp2k.psmp",
     environment: dict[str, str] | None = None,
+    generate_figures: bool = True,
+    overwrite_figures: bool = False,
 ) -> ConvergenceReport:
     """Execute, analyse, and report a CP2K convergence campaign."""
 
@@ -227,6 +308,8 @@ def run_and_report_cp2k_convergence_campaign(
         campaign_directory=campaign_directory,
         study=study,
         observations=observations,
+        generate_figures=generate_figures,
+        overwrite_figures=overwrite_figures,
     )
 
 

@@ -14,8 +14,8 @@ def test_convergence_analyse_uses_existing_outputs(
 ):
     calls = []
 
-    def fake_analyse(*, campaign_directory):
-        calls.append(campaign_directory)
+    def fake_analyse(*, campaign_directory, generate_figures=True):
+        calls.append((campaign_directory, generate_figures))
         return SimpleNamespace(
             parameter=SimpleNamespace(value="cutoff"),
             energy_tolerance_satisfied=True,
@@ -34,7 +34,7 @@ def test_convergence_analyse_uses_existing_outputs(
     )
 
     assert result.exit_code == 0, result.output
-    assert calls == [tmp_path.resolve()]
+    assert calls == [(tmp_path.resolve(), True)]
     assert "600-Ry" in result.output
 
 

@@ -51,3 +51,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+markers = [
+    "aiida_integration: requires an existing AiiDA profile and calculation database",
+]
+addopts = "-m 'not aiida_integration'"

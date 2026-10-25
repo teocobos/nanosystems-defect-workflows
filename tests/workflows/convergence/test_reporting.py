@@ -503,3 +503,29 @@ def test_plot_rejects_unsupported_output_format(tmp_path):
         match="Unsupported convergence plot format",
     ):
         report.write_plot(output_path)
+
+def test_report_writes_pdf_convergence_plot(tmp_path):
+    report = _build_report()
+    output_path = tmp_path / "convergence.pdf"
+
+    report.write_plot(output_path)
+
+    assert output_path.exists()
+    assert output_path.stat().st_size > 0
+
+
+def test_report_accepts_custom_png_dpi(tmp_path):
+    report = _build_report()
+    output_path = tmp_path / "convergence-300dpi.png"
+
+    report.write_plot(output_path, dpi=300)
+
+    assert output_path.exists()
+    assert output_path.stat().st_size > 0
+
+
+def test_report_rejects_invalid_plot_dpi(tmp_path):
+    report = _build_report()
+
+    with pytest.raises(ValueError, match="Plot DPI"):
+        report.write_plot(tmp_path / "invalid.png", dpi=0)

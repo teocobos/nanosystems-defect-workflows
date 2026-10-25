@@ -8,6 +8,7 @@ from pymatgen.core import Structure
 
 from nsdw.calculators.cp2k.generation_models import (
     CP2KInputConfig,
+    CP2KKPointScheme,
     CP2KXCFunctional,
 )
 
@@ -171,33 +172,87 @@ def build_aiida_cp2k_parameters(
             "SCF_GUESS": scf.scf_guess,
             "EPS_SCF": scf.eps_scf,
             "MAX_SCF": scf.max_scf,
-            "OT": {
-                "MINIMIZER": scf.ot_minimizer,
-                "PRECONDITIONER": scf.ot_preconditioner,
-                "ENERGY_GAP": scf.energy_gap,
-            },
-            "OUTER_SCF": {
-                "MAX_SCF": scf.outer_scf_max,
-            },
         },
         "XC": _build_aiida_xc(
             config.functional
         ),
     }
 
+    sampling = config.kpoint_sampling
+    explicit_sampling = (
+        config.k_points is not None
+        or (
+            sampling is not None
+            and sampling.scheme != CP2KKPointScheme.NONE
+        )
+    )
+
+    if explicit_sampling and scf.solver == "OT":
+        raise CP2KAiiDAAdapterError(
+            "Explicit k-point sampling requires "
+            "SCF solver DIAGONALIZATION."
+        )
+
+    if scf.solver == "OT":
+        dft["SCF"]["OT"] = {
+            "MINIMIZER": scf.ot_minimizer,
+            "PRECONDITIONER": scf.ot_preconditioner,
+            "ENERGY_GAP": scf.energy_gap,
+        }
+        dft["SCF"]["OUTER_SCF"] = {
+            "MAX_SCF": scf.outer_scf_max,
+        }
+    elif scf.solver == "DIAGONALIZATION":
+        dft["SCF"]["DIAGONALIZATION"] = {
+            "ALGORITHM": "STANDARD",
+        }
+    else:
+        raise CP2KAiiDAAdapterError(
+            f"Unsupported SCF solver: {scf.solver}"
+        )
+
     if config.k_points is not None:
         kx, ky, kz = config.k_points
-
         if min(kx, ky, kz) <= 0:
             raise CP2KAiiDAAdapterError(
                 "CP2K k-point values must all be positive."
             )
-
         dft["KPOINTS"] = {
-            "SCHEME": (
-                f"MONKHORST-PACK {kx} {ky} {kz}"
-            ),
+            "SCHEME": f"MONKHORST-PACK {kx} {ky} {kz}",
         }
+    elif sampling is not None:
+        if sampling.scheme == CP2KKPointScheme.GAMMA:
+            dft["KPOINTS"] = {"SCHEME": "GAMMA"}
+        elif sampling.scheme == CP2KKPointScheme.MONKHORST_PACK:
+            kx, ky, kz = sampling.mesh
+            dft["KPOINTS"] = {
+                "SCHEME": f"MONKHORST-PACK {kx} {ky} {kz}",
+            }
+        elif sampling.scheme == CP2KKPointScheme.MACDONALD:
+            kx, ky, kz = sampling.mesh
+            sx, sy, sz = sampling.shift
+            dft["KPOINTS"] = {
+                "SCHEME": (
+                    f"MACDONALD {kx} {ky} {kz} "
+                    f"{sx:.12g} {sy:.12g} {sz:.12g}"
+                ),
+            }
+        elif sampling.scheme == CP2KKPointScheme.GENERAL:
+            dft["KPOINTS"] = {
+                "SCHEME": "GENERAL",
+                "KPOINT": [
+                    (
+                        f"{x:.12g} {y:.12g} {z:.12g} "
+                        f"{point.weight:.12g}"
+                    )
+                    for point in sampling.points
+                    for x, y, z in [point.coordinates]
+                ],
+            }
+        elif sampling.scheme != CP2KKPointScheme.NONE:
+            raise CP2KAiiDAAdapterError(
+                f"Unsupported k-point scheme: {sampling.scheme}"
+            )
 
     kinds = [
         {

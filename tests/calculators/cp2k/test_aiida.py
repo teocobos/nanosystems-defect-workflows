@@ -171,6 +171,8 @@ def test_aiida_parameters_include_kpoints() -> None:
     parameters = build_aiida_cp2k_parameters(
         config=_config(
             k_points=(6, 6, 1),
+        ).model_copy(
+            update={"scf": CP2KSCFConfig(solver="DIAGONALIZATION")}
         ),
         structure=_structure(),
     )
@@ -243,4 +245,73 @@ def test_aiida_parameters_require_kind_coverage() -> None:
         build_aiida_cp2k_parameters(
             config=config,
             structure=_structure(),
+        )
+
+
+def test_aiida_diagonalization_omits_ot() -> None:
+    config = _config().model_copy(
+        update={"scf": CP2KSCFConfig(solver="DIAGONALIZATION")}
+    )
+    params = build_aiida_cp2k_parameters(
+        config=config, structure=_structure()
+    )
+    scf = params["FORCE_EVAL"]["DFT"]["SCF"]
+    assert scf["DIAGONALIZATION"] == {"ALGORITHM": "STANDARD"}
+    assert "OT" not in scf
+    assert "OUTER_SCF" not in scf
+
+
+def test_aiida_rejects_ot_with_explicit_kpoints() -> None:
+    with pytest.raises(
+        CP2KAiiDAAdapterError,
+        match="requires SCF solver DIAGONALIZATION",
+    ):
+        build_aiida_cp2k_parameters(
+            config=_config(k_points=(2, 2, 2)),
+            structure=_structure(),
+        )
+
+
+def test_aiida_structured_monkhorst_pack() -> None:
+    from nsdw.calculators.cp2k.generation_models import (
+        CP2KKPointConfig,
+        CP2KKPointScheme,
+    )
+
+    config = _config().model_copy(
+        update={
+            "kpoint_sampling": CP2KKPointConfig(
+                scheme=CP2KKPointScheme.MONKHORST_PACK,
+                mesh=(2, 2, 2),
+            ),
+            "scf": CP2KSCFConfig(solver="DIAGONALIZATION"),
+        }
+    )
+    params = build_aiida_cp2k_parameters(
+        config=config, structure=_structure()
+    )
+    assert params["FORCE_EVAL"]["DFT"]["KPOINTS"] == {
+        "SCHEME": "MONKHORST-PACK 2 2 2"
+    }
+
+
+def test_aiida_rejects_ot_with_structured_gamma() -> None:
+    from nsdw.calculators.cp2k.generation_models import (
+        CP2KKPointConfig,
+        CP2KKPointScheme,
+    )
+
+    config = _config().model_copy(
+        update={
+            "kpoint_sampling": CP2KKPointConfig(
+                scheme=CP2KKPointScheme.GAMMA,
+            ),
+        }
+    )
+    with pytest.raises(
+        CP2KAiiDAAdapterError,
+        match="requires SCF solver DIAGONALIZATION",
+    ):
+        build_aiida_cp2k_parameters(
+            config=config, structure=_structure()
         )

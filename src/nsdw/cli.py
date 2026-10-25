@@ -1880,11 +1880,166 @@ def workflow_convergence_generate(
 
 
 
+
+@workflow_app.command("convergence-plot")
+def workflow_convergence_plot(
+    dataset: Path = typer.Argument(
+        Path("."),
+        help="Multigrid JSON file or directory containing it.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Figure output directory (default: figures/).",
+    ),
+    formats: list[str] | None = typer.Option(
+        None,
+        "--format",
+        "-f",
+        help="Figure format; repeat for multiple formats.",
+    ),
+    dpi: int = typer.Option(
+        600,
+        "--dpi",
+        help="PNG resolution (default: 600).",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Allow replacement of existing figures.",
+    ),
+) -> None:
+    """Generate multigrid figures without running calculations."""
+
+    from nsdw.workflows.convergence.multigrid_plotting import (
+        SUPPORTED_FORMATS,
+        load_multigrid_dataset,
+        render_multigrid_figures,
+    )
+
+    dataset = dataset.expanduser().resolve()
+
+    try:
+        if dataset.is_dir():
+            candidates = [
+                dataset / "multigrid_data.json",
+                dataset / "figures" / "multigrid_data.json",
+            ]
+            matches = [
+                path for path in candidates if path.is_file()
+            ]
+
+            if not matches:
+                raise FileNotFoundError(
+                    "No multigrid_data.json found in "
+                    f"{dataset} or its figures/ directory."
+                )
+
+            if len(matches) > 1:
+                raise ValueError(
+                    "Multiple multigrid datasets found. "
+                    "Specify the JSON file explicitly."
+                )
+
+            dataset = matches[0]
+
+        if not dataset.is_file():
+            raise FileNotFoundError(
+                f"Dataset does not exist: {dataset}"
+            )
+
+        selected_formats = tuple(
+            dict.fromkeys(
+                item.lower()
+                for item in (
+                    formats
+                    if formats is not None
+                    else SUPPORTED_FORMATS
+                )
+            )
+        )
+
+        if not selected_formats or any(
+            item not in SUPPORTED_FORMATS
+            for item in selected_formats
+        ):
+            raise ValueError(
+                "Formats must be png, pdf or svg."
+            )
+
+        if isinstance(dpi, bool) or dpi < 72:
+            raise ValueError(
+                "DPI must be an integer >= 72."
+            )
+
+        destination = (
+            output.expanduser().resolve()
+            if output is not None
+            else dataset.parent / "figures"
+        )
+
+        # Validate before writing anything.
+        load_multigrid_dataset(dataset)
+
+        figure_names = (
+            "gaussian_grid_counts",
+            "gaussian_grid_distribution",
+            "multigrid_cutoff_levels",
+        )
+
+        targets = [
+            destination / f"{name}.{extension}"
+            for name in figure_names
+            for extension in selected_formats
+        ]
+
+        existing = [
+            path for path in targets if path.exists()
+        ]
+
+        if existing and not overwrite:
+            raise ValueError(
+                "Figures already exist. Use --overwrite "
+                "to replace them: "
+                + ", ".join(str(path) for path in existing)
+            )
+
+        generated = render_multigrid_figures(
+            dataset=dataset,
+            output_directory=destination,
+            formats=selected_formats,
+            dpi=dpi,
+        )
+
+    except (
+        FileNotFoundError,
+        ValueError,
+        OSError,
+    ) as exc:
+        console.print(
+            f"[bold red]ERROR:[/bold red] {exc}"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        "[bold green]Multigrid figures generated[/bold green]"
+    )
+    console.print(f"Dataset: {dataset}")
+    console.print(f"Output:  {destination}")
+    console.print(f"Figures: {len(generated)}")
+
+
 @workflow_app.command("convergence-analyse")
 def workflow_convergence_analyse(
     campaign_directory: Path = typer.Argument(
         ...,
         help="Completed CP2K convergence campaign directory.",
+    ),
+    generate_figures: bool = typer.Option(
+        True,
+        "--figures/--no-figures",
+        help="Generate scientific figures (default: enabled).",
     ),
 ) -> None:
     """Analyse existing CP2K outputs without executing calculations."""
@@ -1898,7 +2053,9 @@ def workflow_convergence_analyse(
     try:
         report = analyse_and_report_existing_cp2k_convergence_campaign(
             campaign_directory=campaign_directory,
-        )
+
+            generate_figures=generate_figures,
+)
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         console.print(f"[bold red]ERROR:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -1941,6 +2098,11 @@ def workflow_convergence_run(
             "and automatic installation discovery."
         ),
     ),
+    generate_figures: bool = typer.Option(
+        True,
+        "--figures/--no-figures",
+        help="Generate scientific figures (default: enabled).",
+    ),
 ) -> None:
     """Execute, analyse, and report a CP2K convergence campaign."""
 
@@ -1960,7 +2122,9 @@ def workflow_convergence_run(
             campaign_directory=campaign_directory,
             executable=executable,
             environment=execution_environment,
-        )
+
+            generate_figures=generate_figures,
+)
 
     except (
         FileNotFoundError,

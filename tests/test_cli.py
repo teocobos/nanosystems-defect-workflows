@@ -776,6 +776,7 @@ def test_workflow_convergence_run(
         campaign_directory=campaign_directory.resolve(),
         executable="cp2k.psmp",
         environment=execution_environment,
+        generate_figures=True,
     )
 
 
@@ -835,6 +836,7 @@ def test_workflow_convergence_run_passes_explicit_cp2k_data_dir(
         campaign_directory=campaign_directory.resolve(),
         executable="custom-cp2k",
         environment=execution_environment,
+        generate_figures=True,
     )
 
 
@@ -879,6 +881,7 @@ def test_workflow_convergence_run_failure(
         campaign_directory=campaign_directory.resolve(),
         executable="cp2k.psmp",
         environment=execution_environment,
+        generate_figures=True,
     )
 
 def test_workflow_convergence_run_end_to_end(
