@@ -217,6 +217,11 @@ class CP2KConvergenceWorkChain(WorkChain):
         spec.input("code", valid_type=Code)
         spec.input("structure", valid_type=StructureData)
         spec.input("candidates", valid_type=Dict)
+        spec.input(
+            "scientific_specification",
+            valid_type=Dict,
+            required=False,
+        )
         spec.input("resources", valid_type=Dict)
         spec.input(
             "parameter",
@@ -259,7 +264,67 @@ class CP2KConvergenceWorkChain(WorkChain):
 
         try:
             validate_candidate_payload(candidates, resources)
-        except ValueError as exc:
+
+            if "scientific_specification" in self.inputs:
+                from nsdw.workflows.convergence.aiida_campaign_specification import (
+                    _validate_payload,
+                    specification_digest,
+                    CampaignSpecification,
+                )
+                from nsdw.workflows.convergence.aiida_specification_binding import (
+                    validate_specification_binding,
+                    validate_cp2k_cutoff_parameters,
+                )
+
+                binding_payload = (
+                    self.inputs.scientific_specification.get_dict()
+                )
+
+                if set(binding_payload) != {
+                    "specification",
+                    "specification_sha256",
+                    "candidate_cutoffs",
+                }:
+                    raise ValueError(
+                        "Unexpected scientific specification fields."
+                    )
+
+                specification_payload = binding_payload[
+                    "specification"
+                ]
+                name, cutoffs = _validate_payload(
+                    specification_payload
+                )
+                digest = specification_digest(
+                    specification_payload
+                )
+
+                if binding_payload["specification_sha256"] != digest:
+                    raise ValueError(
+                        "Scientific specification digest mismatch."
+                    )
+
+                specification = CampaignSpecification(
+                    campaign_name=name,
+                    expected_cutoffs=cutoffs,
+                    sha256=digest,
+                )
+
+                candidate_cutoffs = binding_payload[
+                    "candidate_cutoffs"
+                ]
+
+                validate_specification_binding(
+                    specification,
+                    candidates,
+                    candidate_cutoffs,
+                )
+                validate_cp2k_cutoff_parameters(
+                    candidates,
+                    candidate_cutoffs,
+                )
+
+        except (ValueError, TypeError, KeyError) as exc:
             self.report(f"Invalid convergence input: {exc}")
             return self.exit_codes.ERROR_INVALID_INPUT
 
